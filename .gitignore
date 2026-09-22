@@ -12,3 +12,4 @@ venv/
 *.png
 !docs/*.png
 출력/
+.설치완료
