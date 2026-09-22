@@ -194,118 +194,101 @@ def _p_grid(box: _Box, n: int = 46) -> list[float]:
     return [10.0 ** (lo + (hi - lo) * i / (n - 1)) for i in range(n)]
 
 
-def _saturation(fluid: str, box: _Box, n: int = 140):
-    """포화액선·포화증기선. (h, p) 목록 두 개를 돌려준다."""
+def _sat_table(fluid: str, box: _Box, n: int = 140):
+    """화면 범위를 덮는 포화 물성표. 포화선과 등건도선이 함께 쓴다."""
     t_crit = props.t_crit(fluid)
     t_hi = t_crit - 0.15
     t_lo = props.t_sat(fluid, box.p_min, q=1) - 25.0
-    liq: list[tuple[float, float]] = []
-    vap: list[tuple[float, float]] = []
-    for i in range(n):
-        t = t_lo + (t_hi - t_lo) * i / (n - 1)
-        try:
-            p = props.p_sat(fluid, t, q=1)
-            liq.append((props.h_sat(fluid, t, 0), p))
-            vap.append((props.h_sat(fluid, t, 1), p))
-        except Exception:
-            continue
+    return props.saturation_table(fluid, t_lo, t_hi, n)
+
+
+def _saturation(table) -> tuple[list, list]:
+    """포화액선·포화증기선을 (h, p) 목록으로."""
+    liq = [(h_f, p) for _, p, h_f, _ in table]
+    vap = [(h_g, p) for _, p, _, h_g in table]
     return liq, vap
 
 
 def _isotherm(fluid: str, t: float, box: _Box) -> list[tuple[float, float]]:
-    """등온선 하나. 액 -> 2상(수평) -> 과열증기 순으로 이어 붙인다."""
-    pts: list[tuple[float, float]] = []
+    """등온선 하나. 액 -> 2상(수평) -> 과열증기 순으로 이어 붙인다.
+
+    과냉액 구간은 거의 수직, 2상 구간은 수평, 과열 구간은 오른쪽 아래로
+    휘는 곡선이 된다. 실제 냉매 선도의 등온선 모양이다.
+    """
     t_crit = props.t_crit(fluid)
 
     if t >= t_crit:
-        for p in reversed(_p_grid(box, 40)):
-            try:
-                pts.append((props.h_tp(fluid, t, p), p))
-            except Exception:
-                continue
-        return pts
+        pressures = list(reversed(_p_grid(box, 40)))
+        hs = props.h_tp_many(fluid, [(t, p) for p in pressures])
+        return [(h, p) for h, p in zip(hs, pressures)]
 
     try:
         p_sat = props.p_sat(fluid, t, q=1)
         h_f = props.h_sat(fluid, t, 0)
         h_g = props.h_sat(fluid, t, 1)
     except Exception:
-        return pts
+        return []
 
     # 1) 과냉 액 구간 : 높은 압력에서 포화압까지 (거의 수직)
-    if p_sat < box.p_max:
-        for p in sorted((p for p in _p_grid(box, 16) if p > p_sat), reverse=True):
-            try:
-                pts.append((props.h_tp(fluid, t, p), p))
-            except Exception:
-                continue
-    pts.append((h_f, p_sat))
-
-    # 2) 2상 구간 : 포화압에서 수평
-    pts.append((h_g, p_sat))
-
+    liquid_p = sorted((p for p in _p_grid(box, 16) if p > p_sat), reverse=True)
     # 3) 과열 증기 구간 : 포화압에서 낮은 압력으로
-    for p in sorted(p for p in _p_grid(box, 30) if p < p_sat):
-        try:
-            pts.append((props.h_tp(fluid, t, p), p))
-        except Exception:
-            continue
-    return pts
+    vapor_p = sorted(p for p in _p_grid(box, 30) if p < p_sat)
 
+    hs = props.h_tp_many(fluid, [(t, p) for p in liquid_p + vapor_p])
+    n_liq = len(liquid_p)
 
-def _quality_line(fluid: str, x: float, box: _Box, n: int = 70):
-    """등건도선 (포화 영역 안)."""
-    t_crit = props.t_crit(fluid)
-    t_hi = t_crit - 0.3
-    t_lo = props.t_sat(fluid, box.p_min, q=1) - 20.0
     pts: list[tuple[float, float]] = []
-    for i in range(n):
-        t = t_lo + (t_hi - t_lo) * i / (n - 1)
-        try:
-            p = props.p_sat(fluid, t, q=1)
-            h_f = props.h_sat(fluid, t, 0)
-            h_g = props.h_sat(fluid, t, 1)
-        except Exception:
-            continue
-        pts.append((h_f + x * (h_g - h_f), p))
+    for h, p in zip(hs[:n_liq], liquid_p):
+        if h == h:
+            pts.append((h, p))
+    pts.append((h_f, p_sat))      # 2) 2상 구간 : 포화압에서 수평
+    pts.append((h_g, p_sat))
+    for h, p in zip(hs[n_liq:], vapor_p):
+        if h == h:
+            pts.append((h, p))
     return pts
 
 
-def _isentrope(fluid: str, s: float, box: _Box, n: int = 52):
-    """등엔트로피선 (과열 증기 영역만).
+def _quality_line(table, x: float) -> list[tuple[float, float]]:
+    """등건도선 (포화 영역 안). 포화표를 그대로 쓴다."""
+    return [(h_f + x * (h_g - h_f), p) for _, p, h_f, h_g in table]
 
-    포화(2상) 영역 안에서는 등엔트로피선을 그리지 않는다.
-    실제 선도도 과열 영역에만 그린다.
+
+def _grid_line(
+    grid: list[tuple[float, list[tuple[float, float, float, float]]]],
+    index: int,
+    value: float,
+) -> list[tuple[float, float]]:
+    """격자에서 어떤 물성이 주어진 값이 되는 자리를 찾아 선을 만든다.
+
+    index 3 은 엔트로피, 4 는 밀도 (격자 한 칸은 (T, h, s, d) 순서다).
+    압력마다 한 줄씩 훑으면서 값이 걸치는 구간을 선형보간한다.
     """
     pts: list[tuple[float, float]] = []
-    for p in _p_grid(box, n):
-        try:
-            h = props.h_sp(fluid, s, p)
-            # 과열증기 쪽만 남긴다. 2상·과냉액 구간은 선을 끊는다.
-            if h <= props.h_sat(fluid, props.t_sat(fluid, p, q=1), 1):
-                pts.append((float("nan"), p))
-                continue
-            pts.append((h, p))
-        except Exception:
-            pts.append((float("nan"), p))
+    col = index - 1          # (T, h, s, d) 에서의 위치
+    for p_kpa, rows in grid:
+        hit = None
+        for a, b in zip(rows, rows[1:]):
+            va, vb = a[col], b[col]
+            if (va - value) * (vb - value) <= 0 and va != vb:
+                f = (value - va) / (vb - va)
+                hit = a[1] + f * (b[1] - a[1])      # 엔탈피 보간
+                break
+        pts.append((hit if hit is not None else float("nan"), p_kpa))
     return pts
 
 
-def _isochore(fluid: str, density: float, box: _Box, n: int = 52):
-    """등비체적선 (과열 증기 영역만)."""
-    pts: list[tuple[float, float]] = []
-    for p in _p_grid(box, n):
-        try:
-            if props.in_two_phase(props.q_dp(fluid, density, p)):
-                pts.append((float("nan"), p))
-                continue
-            pts.append((props.h_dp(fluid, density, p), p))
-        except Exception:
-            pts.append((float("nan"), p))
-    return pts
+def _grid_range(
+    grid: list[tuple[float, list[tuple[float, float, float, float]]]],
+    index: int,
+) -> tuple[float, float]:
+    """격자 안에서 그 물성이 갖는 최소·최대."""
+    col = index - 1
+    values = [row[col] for _, rows in grid for row in rows]
+    return (min(values), max(values)) if values else (0.0, 0.0)
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------# ---------------------------------------------------------------------------
 # 그리기 도우미
 # ---------------------------------------------------------------------------
 
@@ -462,6 +445,7 @@ def ph_diagram_svg(
         )
 
     t_crit = props.t_crit(fluid)
+    sat_table = _sat_table(fluid, box)
 
     # --- 등온선 ---
     if opt.isotherms:
@@ -478,38 +462,34 @@ def ph_diagram_svg(
     # --- 등건도선 ---
     if opt.quality:
         for x_q in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
-            pts = _quality_line(fluid, x_q, box)
+            pts = _quality_line(sat_table, x_q)
             if draw(pts, c["quality"], DASH["quality"], 0.9, 0.9):
                 put_label(pts, "bottom", f"{x_q:.1f}", c["quality"], 0, -5)
 
+    # --- 과열증기 격자 (등엔트로피선·등비체적선에 쓴다) ---
+    grid = []
+    if opt.isentropes or opt.isochores:
+        try:
+            p_grid = _p_grid(box, 26)
+            t_top = props.t_hp(fluid, box.h_max, box.p_min)
+            t_bot = props.t_sat(fluid, box.p_min, q=1)
+            grid = props.vapor_grid(
+                fluid, p_grid, max(30.0, min(t_top - t_bot, 160.0)), 16
+            )
+        except Exception:
+            grid = []
+
     # --- 등엔트로피선 ---
-    # 포화증기선 근처에만 몰리지 않도록, 화면 오른쪽 끝(과열 깊은 곳)까지
-    # 걸치는 범위를 잡는다.
-    if opt.isentropes:
+    if opt.isentropes and grid:
         try:
             # 화면에 보이는 '과열증기 영역' 안에서만 s 범위를 잡는다.
             # 과냉액까지 포함하면 범위가 지나치게 넓어져,
             # 정작 압축 구간 주변에는 선이 한 줄도 안 그려진다.
-            candidates = []
-            for pp in (box.p_min, math.sqrt(box.p_min * box.p_max), box.p_max):
-                try:
-                    candidates.append(
-                        props.s_sat(fluid, props.t_sat(fluid, pp, q=1), 1)
-                    )
-                except Exception:
-                    continue
-            for pp in (box.p_min, box.p_max):
-                try:
-                    candidates.append(props.s_hp(fluid, box.h_max, pp))
-                except Exception:
-                    continue
-            if not candidates:
-                raise ValueError("등엔트로피선 범위를 잡을 수 없다")
-            lo, hi = min(candidates), max(candidates)
+            lo, hi = _grid_range(grid, 3)
             step = _nice_step(hi - lo, 9)
             sv = math.ceil(lo / step) * step
             while sv <= hi + 1e-9:
-                pts = _isentrope(fluid, sv, box)
+                pts = _grid_line(grid, 3, sv)
                 if draw(pts, c["isentrope"], DASH["isentrope"], 0.9, 0.85):
                     put_label(pts, "top", f"s={sv:g}", c["isentrope"], 0, 13)
                 sv += step
@@ -517,14 +497,13 @@ def ph_diagram_svg(
             pass
 
     # --- 등비체적선 ---
-    if opt.isochores:
+    if opt.isochores and grid:
         try:
-            d_lo = props.d_tp(fluid, props.t_sat(fluid, box.p_min, q=1) + 1, box.p_min)
-            d_hi = props.d_tp(fluid, props.t_sat(fluid, box.p_max, q=1) + 1, box.p_max)
+            d_lo, d_hi = _grid_range(grid, 4)
             steps = 5
             for i in range(steps + 1):
                 dens = d_lo * (d_hi / d_lo) ** (i / steps)
-                pts = _isochore(fluid, dens, box)
+                pts = _grid_line(grid, 4, dens)
                 if draw(pts, c["isochore"], DASH["isochore"], 0.9, 0.8):
                     put_label(pts, "right", f"v={_sig(1 / dens)}", c["isochore"],
                               -4, -5, "end")
@@ -532,7 +511,7 @@ def ph_diagram_svg(
             pass
 
     # --- 포화선 ---
-    liq, vap = _saturation(fluid, box)
+    liq, vap = _saturation(sat_table)
     draw(liq, c["dome"], "", 2.2)
     draw(vap, c["dome"], "", 2.2)
 

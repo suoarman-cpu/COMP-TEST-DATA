@@ -25,7 +25,7 @@ import argparse
 import math
 import sys
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Literal, Optional
+from typing import Any, Callable, Iterable, Literal, Optional, Sequence
 
 from CoolProp.CoolProp import PropsSI
 
@@ -75,6 +75,22 @@ def normalize(refrigerant: str) -> str:
     """사용자가 적은 냉매 이름을 CoolProp 이름으로 바꾼다."""
     key = refrigerant.strip().upper()
     return ALIASES.get(key, refrigerant.strip())
+
+
+#: 냉매별 상태 계산기를 재사용한다. 만드는 비용이 제법 크다.
+_STATES: dict = {}
+
+
+def _state(fluid: str):
+    """그 냉매의 CoolProp 상태 계산기를 돌려준다 (만들어 두고 재사용)."""
+    from CoolProp import AbstractState
+
+    name = normalize(fluid)
+    st = _STATES.get(name)
+    if st is None:
+        st = AbstractState("HEOS", name)
+        _STATES[name] = st
+    return st
 
 
 def _props(output: str, n1: str, v1: float, n2: str, v2: float, fluid: str) -> float:
@@ -213,6 +229,117 @@ def q_dp(fluid: str, density: float, p_kpa: float) -> float:
 def in_two_phase(q: float) -> bool:
     """CoolProp 이 돌려준 건도가 2상 영역을 뜻하는지."""
     return 0.0 <= q <= 1.0
+
+
+def vapor_grid(
+    fluid: str,
+    p_values: list[float],
+    t_span: float,
+    n_t: int = 16,
+) -> list[tuple[float, list[tuple[float, float, float, float]]]]:
+    """과열증기 영역의 (P, T) 격자에서 h·s·밀도를 한 번에 구한다.
+
+    등엔트로피선·등비체적선을 그릴 때 쓴다.
+    (s,P) 나 (밀도,P) 로 물성을 구하는 호출은 혼합냉매에서 대단히 느려서
+    (한 번에 90ms 가까이 걸린다), 빠른 (T,P) 호출로 격자를 한 번 만들고
+    그 안에서 보간해 쓴다. 혼합냉매 기준 30배 넘게 빨라진다.
+
+    p_values : 압력 목록 [kPa]
+    t_span   : 각 압력에서 포화온도로부터 몇 도까지 볼지 [K]
+    반환     : [(압력, [(온도, 엔탈피, 엔트로피, 밀도), ...]), ...]
+    """
+    import CoolProp
+
+    try:
+        state = _state(fluid)
+    except Exception as exc:
+        raise PropertyError(f"{fluid} 상태 계산기를 만들 수 없다: {exc}") from exc
+
+    columns: list[tuple[float, list[tuple[float, float, float, float]]]] = []
+    for p_kpa in p_values:
+        try:
+            t_start = t_sat(fluid, p_kpa, q=1) + 0.05
+        except PropertyError:
+            continue
+        rows: list[tuple[float, float, float, float]] = []
+        for i in range(n_t):
+            t_c = t_start + t_span * i / (n_t - 1)
+            try:
+                state.update(CoolProp.PT_INPUTS, p_kpa * 1000.0, t_c + T0)
+                rows.append(
+                    (t_c, state.hmass() / 1000.0, state.smass() / 1000.0,
+                     state.rhomass())
+                )
+            except Exception:
+                continue
+        if len(rows) >= 2:
+            columns.append((p_kpa, rows))
+    return columns
+
+
+def h_tp_many(fluid: str, pairs: list[tuple[float, float]]) -> list[float]:
+    """여러 (온도, 압력) 에서의 엔탈피를 한꺼번에 구한다 [kJ/kg].
+
+    한 점씩 PropsSI 를 부르는 것보다 훨씬 빠르다. 특히 혼합냉매에서 차이가 크다.
+    계산이 안 되는 점은 nan 으로 돌려준다.
+    """
+    import CoolProp
+
+    try:
+        state = _state(fluid)
+    except Exception:
+        # 상태 계산기를 못 만들면 한 점씩이라도 구한다
+        out = []
+        for t_c, p_kpa in pairs:
+            try:
+                out.append(h_tp(fluid, t_c, p_kpa))
+            except PropertyError:
+                out.append(float("nan"))
+        return out
+
+    out: list[float] = []
+    for t_c, p_kpa in pairs:
+        try:
+            state.update(CoolProp.PT_INPUTS, p_kpa * 1000.0, t_c + T0)
+            out.append(state.hmass() / 1000.0)
+        except Exception:
+            out.append(float("nan"))
+    return out
+
+
+def saturation_table(
+    fluid: str, t_min: float, t_max: float, n: int = 140
+) -> list[tuple[float, float, float, float]]:
+    """포화 물성표를 한 번에 만든다.
+
+    반환: [(온도, 포화압력, 포화액 엔탈피, 포화증기 엔탈피), ...]
+    포화선과 등건도선이 같은 표를 나눠 쓰게 해서 중복 계산을 없앤다.
+    """
+    import CoolProp
+
+    try:
+        state = _state(fluid)
+    except Exception:
+        state = None
+
+    rows: list[tuple[float, float, float, float]] = []
+    for i in range(n):
+        t_c = t_min + (t_max - t_min) * i / (n - 1)
+        try:
+            if state is not None:
+                state.update(CoolProp.QT_INPUTS, 0.0, t_c + T0)
+                p_kpa = state.p() / 1000.0
+                h_f = state.hmass() / 1000.0
+                state.update(CoolProp.QT_INPUTS, 1.0, t_c + T0)
+                h_g = state.hmass() / 1000.0
+            else:
+                p_kpa = p_sat(fluid, t_c, q=1)
+                h_f = h_sat(fluid, t_c, 0)
+                h_g = h_sat(fluid, t_c, 1)
+        except Exception:
+            continue
+        rows.append((t_c, p_kpa, h_f, h_g))
+    return rows
 
 
 # ==========================================================================
@@ -996,6 +1123,286 @@ def iplv(
 
 
 # ==========================================================================
+# retrofit.py
+# ==========================================================================
+
+@dataclass
+class MachineSpec:
+    """기존 압축기를 사이클 관점에서 표현한 것."""
+
+    suction_volume_flow: float      # 1단 흡입 체적유량 [m3/s]
+    stage_works: list[float]        # 단별 실제 엔탈피 상승 [kJ/kg]
+    eta_is: list[float]             # 단별 단열효율
+    eta_wire_to_shaft: float
+    stages: int
+    source_refrigerant: str
+
+    @classmethod
+    def from_result(cls, res: CycleResult) -> "MachineSpec":
+        """설계 계산 결과에서 기계 사양을 뽑아낸다."""
+        first = res.stage_results[0]
+        return cls(
+            suction_volume_flow=first.mass_flow / first.suction_density,
+            stage_works=[st.dh_actual for st in res.stage_results],
+            eta_is=[st.eta_isentropic for st in res.stage_results],
+            eta_wire_to_shaft=res.inp.eta_wire_to_shaft,
+            stages=res.stages,
+            source_refrigerant=res.refrigerant,
+        )
+
+    @property
+    def total_work(self) -> float:
+        """단위질량당 총 일 [kJ/kg]."""
+        return sum(self.stage_works)
+
+    @property
+    def suction_volume_flow_m3h(self) -> float:
+        return self.suction_volume_flow * 3600.0
+
+
+@dataclass
+class RetrofitPoint:
+    """냉매 하나를 기존 기계에 넣었을 때의 결과.
+
+    운전조건(증발온도·응축온도)은 설계 그대로 두고 본다.
+    응축온도는 압축기가 아니라 응축기와 외기가 정하는 값이기 때문이다.
+    기계에서 고정되는 것은 '삼키는 부피' 와 '단위질량당 하는 일' 두 가지다.
+    """
+
+    refrigerant: str
+    ok: bool
+    message: str = ""
+
+    # 운전조건 (설계와 동일)
+    t_evap: float = 0.0
+    t_cond: float = 0.0
+    p_evap: float = 0.0
+    p_cond: float = 0.0
+    pressure_ratio: float = 0.0
+
+    # 기계가 삼키는 부피는 같고, 밀도가 달라져 질량유량이 달라진다
+    suction_density: float = 0.0        # [kg/m3]
+    mass_flow: float = 0.0              # [kg/s]
+    refrigerating_effect: float = 0.0   # 냉동효과 [kJ/kg]
+    volumetric_capacity: float = 0.0    # 체적 냉동능력 [kJ/m3]
+
+    # 능력과 동력
+    capacity_kw: float = 0.0
+    capacity_rt: float = 0.0
+    capacity_ratio: float = 0.0         # 기준 냉매 대비
+    shaft_power: float = 0.0
+    input_power: float = 0.0
+    cop: float = 0.0
+    cop_ratio: float = 0.0
+    discharge_temp: float = 0.0
+
+    # 헤드(일) 여유 — 이 조건을 만들 수 있는가
+    work_required: float = 0.0          # 이 조건에 필요한 일 [kJ/kg]
+    work_available: float = 0.0         # 기계가 하는 일 [kJ/kg]
+    head_margin: float = 0.0            # 여유율 [-] (0.1 이면 10% 여유)
+    reachable_t_cond: Optional[float] = None   # 이 일로 갈 수 있는 최대 응축온도
+
+    result: Optional[CycleResult] = None
+
+    @property
+    def head_ok(self) -> bool:
+        return self.head_margin >= 0.0
+
+
+def _required_work(inp: CycleInput, t_cond: float, stages: int) -> Optional[float]:
+    """그 응축온도까지 올리는 데 필요한 단위질량당 일 [kJ/kg]."""
+    try:
+        res = solve(inp.at(t_cond=t_cond, t_evap=inp.te), stages=stages)
+    except (ValueError, RuntimeError):
+        return None
+    return sum(st.dh_actual for st in res.stage_results)
+
+
+def _solve_reachable_cond(
+    inp: CycleInput, machine: MachineSpec, stages: int,
+) -> tuple[Optional[float], str]:
+    """기계가 낼 수 있는 일로 도달 가능한 응축온도를 찾는다.
+
+    필요한 일은 응축온도가 올라갈수록 커진다. 다만 응축온도가 너무 낮으면
+    서브콘덴서나 과냉 조건이 성립하지 않아 계산 자체가 안 되는 구간이 있다.
+    그래서 먼저 계산 가능한 구간을 훑어 찾고, 그 안에서 이분법을 쓴다.
+    """
+    te = inp.te
+    hi_limit = min(props.t_crit(inp.refrigerant) - 3.0, 130.0)
+    lo_limit = te + 1.0
+    if hi_limit <= lo_limit:
+        return None, "증발온도가 임계온도에 너무 가깝다"
+
+    target = machine.total_work
+
+    # 1) 계산 가능한 (응축온도, 필요한 일) 을 훑는다
+    samples: list[tuple[float, float]] = []
+    steps = 18
+    for i in range(steps + 1):
+        t = lo_limit + (hi_limit - lo_limit) * i / steps
+        w = _required_work(inp, t, stages)
+        if w is not None:
+            samples.append((t, w))
+    if not samples:
+        return None, "이 냉매로는 주어진 조건에서 사이클이 성립하지 않는다"
+
+    lowest_t, lowest_w = samples[0]
+    highest_t, highest_w = samples[-1]
+
+    if lowest_w > target:
+        return None, (
+            f"기계의 일({target:.1f} kJ/kg)로는 가장 낮은 응축온도"
+            f"({lowest_t:.0f}°C, {lowest_w:.1f} kJ/kg 필요)조차 만들지 못한다"
+        )
+    if highest_w < target:
+        return highest_t, (
+            f"임계점 부근({highest_t:.0f}°C)까지 여유가 있다. "
+            "실제로는 다른 조건이 먼저 걸린다"
+        )
+
+    # 2) 필요한 일이 기계의 일을 넘어서는 지점을 찾는다
+    lo, hi = lowest_t, highest_t
+    for (t_a, w_a), (t_b, w_b) in zip(samples, samples[1:]):
+        if w_a <= target <= w_b:
+            lo, hi = t_a, t_b
+            break
+
+    for _ in range(24):
+        mid = 0.5 * (lo + hi)
+        w = _required_work(inp, mid, stages)
+        if w is None:
+            lo = mid          # 계산이 안 되는 구간은 위로 밀어낸다
+            continue
+        if w < target:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 0.02:
+            break
+    return 0.5 * (lo + hi), ""
+
+
+def retrofit_one(
+    machine: MachineSpec,
+    base: CycleInput,
+    refrigerant: str,
+    stages: Optional[int] = None,
+    baseline: Optional[RetrofitPoint] = None,
+) -> RetrofitPoint:
+    """냉매 하나를 기존 기계에 넣어 본다 (운전조건은 설계 그대로)."""
+    stages = stages or machine.stages
+    inp = base.at(refrigerant=refrigerant)
+
+    try:
+        t_crit = props.t_crit(refrigerant)
+    except Exception as exc:
+        return RetrofitPoint(refrigerant, False, f"물성을 읽을 수 없다: {exc}")
+    if inp.tc >= t_crit - 1.0:
+        return RetrofitPoint(
+            refrigerant, False,
+            f"응축온도({inp.tc:.0f}°C)가 임계온도({t_crit:.0f}°C)를 넘거나 붙는다",
+        )
+
+    try:
+        res = solve(inp, stages=stages)
+    except (ValueError, RuntimeError) as exc:
+        return RetrofitPoint(refrigerant, False, f"사이클 계산 실패: {exc}")
+
+    # 기계가 삼키는 부피는 그대로, 밀도가 달라져 질량유량이 달라진다
+    first = res.stage_results[0]
+    rho1 = first.suction_density
+    mdot = rho1 * machine.suction_volume_flow
+
+    dh_evap = (
+        res.state(9).h - res.state(8).h if stages == 2
+        else res.state(6).h - res.state(5).h
+    )
+    qe = mdot * dh_evap
+    mdot_total = mdot * (1.0 + (res.subcond_mass_ratio or 0.0))
+
+    work_required = sum(st.dh_actual for st in res.stage_results)
+    work_available = machine.total_work
+    margin = work_available / work_required - 1.0 if work_required > 0 else 0.0
+
+    shaft = sum(
+        st.dh_actual * (mdot if i == 0 else mdot_total)
+        for i, st in enumerate(res.stage_results)
+    )
+
+    # 도달 가능 응축온도는 탐색 비용이 커서, 헤드가 모자랄 때만 구한다
+    reachable: Optional[float] = None
+    note = ""
+    if margin < 0:
+        reachable, _ = _solve_reachable_cond(inp, machine, stages)
+        note = (
+            f"헤드가 {abs(margin) * 100:.0f}% 모자란다. 이 기계로는 "
+            f"응축 {inp.tc:.0f}°C 를 만들 수 없다"
+        )
+        if reachable is not None:
+            note += f" (갈 수 있는 최대 응축온도 약 {reachable:.0f}°C)"
+
+    point = RetrofitPoint(
+        refrigerant=refrigerant,
+        ok=True,
+        message=note,
+        t_evap=inp.te,
+        t_cond=inp.tc,
+        p_evap=res.state(1).p,
+        p_cond=res.stage_results[-1].p_out,
+        pressure_ratio=res.total_pressure_ratio,
+        suction_density=rho1,
+        mass_flow=mdot,
+        refrigerating_effect=dh_evap,
+        volumetric_capacity=rho1 * dh_evap,
+        capacity_kw=qe,
+        capacity_rt=qe / KW_PER_RT,
+        shaft_power=shaft,
+        input_power=shaft / machine.eta_wire_to_shaft,
+        cop=qe / shaft if shaft > 0 else 0.0,
+        discharge_temp=res.stage_results[-1].t_out,
+        work_required=work_required,
+        work_available=work_available,
+        head_margin=margin,
+        reachable_t_cond=reachable,
+        result=res,
+    )
+    if baseline is not None and baseline.ok:
+        point.capacity_ratio = point.capacity_kw / baseline.capacity_kw
+        point.cop_ratio = point.cop / baseline.cop
+    else:
+        point.capacity_ratio = 1.0
+        point.cop_ratio = 1.0
+    return point
+
+
+def retrofit(
+    base: CycleInput,
+    refrigerants: Sequence[str],
+    stages: int = 2,
+    machine: Optional[MachineSpec] = None,
+) -> tuple[MachineSpec, list[RetrofitPoint]]:
+    """기준 냉매로 설계한 기계에 여러 냉매를 넣어 비교한다.
+
+    base         : 기준 냉매와 운전조건이 담긴 입력
+    refrigerants : 비교할 냉매 목록 (기준 냉매를 맨 앞에 두면 보기 좋다)
+    machine      : 기계 사양을 직접 줄 때. 없으면 base 로 설계 계산해서 뽑는다
+    """
+    if machine is None:
+        machine = MachineSpec.from_result(solve(base, stages=stages))
+
+    points: list[RetrofitPoint] = []
+    baseline: Optional[RetrofitPoint] = None
+    for ref in refrigerants:
+        pt = retrofit_one(machine, base, ref, stages, baseline)
+        if baseline is None and pt.ok:
+            baseline = pt
+            pt.capacity_ratio = 1.0
+            pt.cop_ratio = 1.0
+        points.append(pt)
+    return machine, points
+
+
+# ==========================================================================
 # report.py
 # ==========================================================================
 
@@ -1108,6 +1515,47 @@ def format_iplv(res: IplvResult) -> str:
         )
     out.append("  " + THIN[:64])
     out.append(f"  IPLV : COP {res.iplv_cop:.3f} / {res.iplv_kw_per_rt:.4f} kW/RT")
+    return "\n".join(out)
+
+
+def format_retrofit(machine, points) -> str:
+    """같은 압축기에 냉매만 바꿨을 때의 비교표."""
+    out = ["", LINE, " 냉매 교체 검토 — 같은 압축기, 같은 운전조건", LINE, ""]
+    out.append(f"  기준 냉매        : {machine.source_refrigerant}")
+    out.append(f"  흡입 체적유량    : {machine.suction_volume_flow_m3h:9.1f} m3/h  (고정)")
+    out.append(f"  단위질량당 일    : {machine.total_work:9.2f} kJ/kg  (고정)")
+    out.append("")
+    out.append(
+        f"  {'냉매':<12}{'흡입밀도':>9}{'체적능력':>10}{'능력':>11}{'능력비':>8}"
+        f"{'압축비':>8}{'축동력':>10}{'COP':>7}{'COP비':>7}{'헤드여유':>9}"
+    )
+    out.append(
+        f"  {'':<12}{'kg/m3':>9}{'kJ/m3':>10}{'RT':>11}{'':>8}{'':>8}{'kW':>10}"
+        f"{'':>7}{'':>7}{'':>9}"
+    )
+    out.append("  " + THIN[:90])
+    for p in points:
+        if not p.ok:
+            out.append(f"  {p.refrigerant:<12}  {p.message}")
+            continue
+        out.append(
+            f"  {p.refrigerant:<12}{p.suction_density:>9.2f}"
+            f"{p.volumetric_capacity:>10.0f}{p.capacity_rt:>11.1f}"
+            f"{p.capacity_ratio * 100:>7.0f}%{p.pressure_ratio:>8.2f}"
+            f"{p.shaft_power:>10.1f}{p.cop:>7.3f}{p.cop_ratio * 100:>6.0f}%"
+            f"{p.head_margin * 100:>8.0f}%"
+        )
+    out.append("  " + THIN[:90])
+    for p in points:
+        if p.ok and p.message:
+            out.append(f"  ! {p.refrigerant}: {p.message}")
+    out.append("")
+    out.append("  읽는 법")
+    out.append("    체적능력 : 흡입 1 m3 당 낼 수 있는 냉동능력. 같은 기계면")
+    out.append("               능력이 이 값에 비례한다")
+    out.append("    헤드여유 : 이 운전조건에 필요한 일 대비 기계가 하는 일의 여유.")
+    out.append("               음수면 그 응축온도를 만들지 못한다")
+    out.append(LINE)
     return "\n".join(out)
 
 
@@ -1293,118 +1741,101 @@ def _p_grid(box: _Box, n: int = 46) -> list[float]:
     return [10.0 ** (lo + (hi - lo) * i / (n - 1)) for i in range(n)]
 
 
-def _saturation(fluid: str, box: _Box, n: int = 140):
-    """포화액선·포화증기선. (h, p) 목록 두 개를 돌려준다."""
+def _sat_table(fluid: str, box: _Box, n: int = 140):
+    """화면 범위를 덮는 포화 물성표. 포화선과 등건도선이 함께 쓴다."""
     t_crit = props.t_crit(fluid)
     t_hi = t_crit - 0.15
     t_lo = props.t_sat(fluid, box.p_min, q=1) - 25.0
-    liq: list[tuple[float, float]] = []
-    vap: list[tuple[float, float]] = []
-    for i in range(n):
-        t = t_lo + (t_hi - t_lo) * i / (n - 1)
-        try:
-            p = props.p_sat(fluid, t, q=1)
-            liq.append((props.h_sat(fluid, t, 0), p))
-            vap.append((props.h_sat(fluid, t, 1), p))
-        except Exception:
-            continue
+    return props.saturation_table(fluid, t_lo, t_hi, n)
+
+
+def _saturation(table) -> tuple[list, list]:
+    """포화액선·포화증기선을 (h, p) 목록으로."""
+    liq = [(h_f, p) for _, p, h_f, _ in table]
+    vap = [(h_g, p) for _, p, _, h_g in table]
     return liq, vap
 
 
 def _isotherm(fluid: str, t: float, box: _Box) -> list[tuple[float, float]]:
-    """등온선 하나. 액 -> 2상(수평) -> 과열증기 순으로 이어 붙인다."""
-    pts: list[tuple[float, float]] = []
+    """등온선 하나. 액 -> 2상(수평) -> 과열증기 순으로 이어 붙인다.
+
+    과냉액 구간은 거의 수직, 2상 구간은 수평, 과열 구간은 오른쪽 아래로
+    휘는 곡선이 된다. 실제 냉매 선도의 등온선 모양이다.
+    """
     t_crit = props.t_crit(fluid)
 
     if t >= t_crit:
-        for p in reversed(_p_grid(box, 40)):
-            try:
-                pts.append((props.h_tp(fluid, t, p), p))
-            except Exception:
-                continue
-        return pts
+        pressures = list(reversed(_p_grid(box, 40)))
+        hs = props.h_tp_many(fluid, [(t, p) for p in pressures])
+        return [(h, p) for h, p in zip(hs, pressures)]
 
     try:
         p_sat = props.p_sat(fluid, t, q=1)
         h_f = props.h_sat(fluid, t, 0)
         h_g = props.h_sat(fluid, t, 1)
     except Exception:
-        return pts
+        return []
 
     # 1) 과냉 액 구간 : 높은 압력에서 포화압까지 (거의 수직)
-    if p_sat < box.p_max:
-        for p in sorted((p for p in _p_grid(box, 16) if p > p_sat), reverse=True):
-            try:
-                pts.append((props.h_tp(fluid, t, p), p))
-            except Exception:
-                continue
-    pts.append((h_f, p_sat))
-
-    # 2) 2상 구간 : 포화압에서 수평
-    pts.append((h_g, p_sat))
-
+    liquid_p = sorted((p for p in _p_grid(box, 16) if p > p_sat), reverse=True)
     # 3) 과열 증기 구간 : 포화압에서 낮은 압력으로
-    for p in sorted(p for p in _p_grid(box, 30) if p < p_sat):
-        try:
-            pts.append((props.h_tp(fluid, t, p), p))
-        except Exception:
-            continue
-    return pts
+    vapor_p = sorted(p for p in _p_grid(box, 30) if p < p_sat)
 
+    hs = props.h_tp_many(fluid, [(t, p) for p in liquid_p + vapor_p])
+    n_liq = len(liquid_p)
 
-def _quality_line(fluid: str, x: float, box: _Box, n: int = 70):
-    """등건도선 (포화 영역 안)."""
-    t_crit = props.t_crit(fluid)
-    t_hi = t_crit - 0.3
-    t_lo = props.t_sat(fluid, box.p_min, q=1) - 20.0
     pts: list[tuple[float, float]] = []
-    for i in range(n):
-        t = t_lo + (t_hi - t_lo) * i / (n - 1)
-        try:
-            p = props.p_sat(fluid, t, q=1)
-            h_f = props.h_sat(fluid, t, 0)
-            h_g = props.h_sat(fluid, t, 1)
-        except Exception:
-            continue
-        pts.append((h_f + x * (h_g - h_f), p))
+    for h, p in zip(hs[:n_liq], liquid_p):
+        if h == h:
+            pts.append((h, p))
+    pts.append((h_f, p_sat))      # 2) 2상 구간 : 포화압에서 수평
+    pts.append((h_g, p_sat))
+    for h, p in zip(hs[n_liq:], vapor_p):
+        if h == h:
+            pts.append((h, p))
     return pts
 
 
-def _isentrope(fluid: str, s: float, box: _Box, n: int = 52):
-    """등엔트로피선 (과열 증기 영역만).
+def _quality_line(table, x: float) -> list[tuple[float, float]]:
+    """등건도선 (포화 영역 안). 포화표를 그대로 쓴다."""
+    return [(h_f + x * (h_g - h_f), p) for _, p, h_f, h_g in table]
 
-    포화(2상) 영역 안에서는 등엔트로피선을 그리지 않는다.
-    실제 선도도 과열 영역에만 그린다.
+
+def _grid_line(
+    grid: list[tuple[float, list[tuple[float, float, float, float]]]],
+    index: int,
+    value: float,
+) -> list[tuple[float, float]]:
+    """격자에서 어떤 물성이 주어진 값이 되는 자리를 찾아 선을 만든다.
+
+    index 3 은 엔트로피, 4 는 밀도 (격자 한 칸은 (T, h, s, d) 순서다).
+    압력마다 한 줄씩 훑으면서 값이 걸치는 구간을 선형보간한다.
     """
     pts: list[tuple[float, float]] = []
-    for p in _p_grid(box, n):
-        try:
-            h = props.h_sp(fluid, s, p)
-            # 과열증기 쪽만 남긴다. 2상·과냉액 구간은 선을 끊는다.
-            if h <= props.h_sat(fluid, props.t_sat(fluid, p, q=1), 1):
-                pts.append((float("nan"), p))
-                continue
-            pts.append((h, p))
-        except Exception:
-            pts.append((float("nan"), p))
+    col = index - 1          # (T, h, s, d) 에서의 위치
+    for p_kpa, rows in grid:
+        hit = None
+        for a, b in zip(rows, rows[1:]):
+            va, vb = a[col], b[col]
+            if (va - value) * (vb - value) <= 0 and va != vb:
+                f = (value - va) / (vb - va)
+                hit = a[1] + f * (b[1] - a[1])      # 엔탈피 보간
+                break
+        pts.append((hit if hit is not None else float("nan"), p_kpa))
     return pts
 
 
-def _isochore(fluid: str, density: float, box: _Box, n: int = 52):
-    """등비체적선 (과열 증기 영역만)."""
-    pts: list[tuple[float, float]] = []
-    for p in _p_grid(box, n):
-        try:
-            if props.in_two_phase(props.q_dp(fluid, density, p)):
-                pts.append((float("nan"), p))
-                continue
-            pts.append((props.h_dp(fluid, density, p), p))
-        except Exception:
-            pts.append((float("nan"), p))
-    return pts
+def _grid_range(
+    grid: list[tuple[float, list[tuple[float, float, float, float]]]],
+    index: int,
+) -> tuple[float, float]:
+    """격자 안에서 그 물성이 갖는 최소·최대."""
+    col = index - 1
+    values = [row[col] for _, rows in grid for row in rows]
+    return (min(values), max(values)) if values else (0.0, 0.0)
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------# ---------------------------------------------------------------------------
 # 그리기 도우미
 # ---------------------------------------------------------------------------
 
@@ -1561,6 +1992,7 @@ def ph_diagram_svg(
         )
 
     t_crit = props.t_crit(fluid)
+    sat_table = _sat_table(fluid, box)
 
     # --- 등온선 ---
     if opt.isotherms:
@@ -1577,38 +2009,34 @@ def ph_diagram_svg(
     # --- 등건도선 ---
     if opt.quality:
         for x_q in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
-            pts = _quality_line(fluid, x_q, box)
+            pts = _quality_line(sat_table, x_q)
             if draw(pts, c["quality"], DASH["quality"], 0.9, 0.9):
                 put_label(pts, "bottom", f"{x_q:.1f}", c["quality"], 0, -5)
 
+    # --- 과열증기 격자 (등엔트로피선·등비체적선에 쓴다) ---
+    grid = []
+    if opt.isentropes or opt.isochores:
+        try:
+            p_grid = _p_grid(box, 26)
+            t_top = props.t_hp(fluid, box.h_max, box.p_min)
+            t_bot = props.t_sat(fluid, box.p_min, q=1)
+            grid = props.vapor_grid(
+                fluid, p_grid, max(30.0, min(t_top - t_bot, 160.0)), 16
+            )
+        except Exception:
+            grid = []
+
     # --- 등엔트로피선 ---
-    # 포화증기선 근처에만 몰리지 않도록, 화면 오른쪽 끝(과열 깊은 곳)까지
-    # 걸치는 범위를 잡는다.
-    if opt.isentropes:
+    if opt.isentropes and grid:
         try:
             # 화면에 보이는 '과열증기 영역' 안에서만 s 범위를 잡는다.
             # 과냉액까지 포함하면 범위가 지나치게 넓어져,
             # 정작 압축 구간 주변에는 선이 한 줄도 안 그려진다.
-            candidates = []
-            for pp in (box.p_min, math.sqrt(box.p_min * box.p_max), box.p_max):
-                try:
-                    candidates.append(
-                        props.s_sat(fluid, props.t_sat(fluid, pp, q=1), 1)
-                    )
-                except Exception:
-                    continue
-            for pp in (box.p_min, box.p_max):
-                try:
-                    candidates.append(props.s_hp(fluid, box.h_max, pp))
-                except Exception:
-                    continue
-            if not candidates:
-                raise ValueError("등엔트로피선 범위를 잡을 수 없다")
-            lo, hi = min(candidates), max(candidates)
+            lo, hi = _grid_range(grid, 3)
             step = _nice_step(hi - lo, 9)
             sv = math.ceil(lo / step) * step
             while sv <= hi + 1e-9:
-                pts = _isentrope(fluid, sv, box)
+                pts = _grid_line(grid, 3, sv)
                 if draw(pts, c["isentrope"], DASH["isentrope"], 0.9, 0.85):
                     put_label(pts, "top", f"s={sv:g}", c["isentrope"], 0, 13)
                 sv += step
@@ -1616,14 +2044,13 @@ def ph_diagram_svg(
             pass
 
     # --- 등비체적선 ---
-    if opt.isochores:
+    if opt.isochores and grid:
         try:
-            d_lo = props.d_tp(fluid, props.t_sat(fluid, box.p_min, q=1) + 1, box.p_min)
-            d_hi = props.d_tp(fluid, props.t_sat(fluid, box.p_max, q=1) + 1, box.p_max)
+            d_lo, d_hi = _grid_range(grid, 4)
             steps = 5
             for i in range(steps + 1):
                 dens = d_lo * (d_hi / d_lo) ** (i / steps)
-                pts = _isochore(fluid, dens, box)
+                pts = _grid_line(grid, 4, dens)
                 if draw(pts, c["isochore"], DASH["isochore"], 0.9, 0.8):
                     put_label(pts, "right", f"v={_sig(1 / dens)}", c["isochore"],
                               -4, -5, "end")
@@ -1631,7 +2058,7 @@ def ph_diagram_svg(
             pass
 
     # --- 포화선 ---
-    liq, vap = _saturation(fluid, box)
+    liq, vap = _saturation(sat_table)
     draw(liq, c["dome"], "", 2.2)
     draw(vap, c["dome"], "", 2.2)
 
@@ -1841,6 +2268,9 @@ FIELDS: tuple[Field, ...] = (
 
     Field("t_cond_max", "최대 응축온도 [°C]", 70.0, step="1", group="기타"),
 
+    Field("show_retrofit", "냉매 교체 검토 (같은 압축기)", False, "check",
+          group="기타",
+          hint="지금 냉매로 만든 기계에 다른 냉매를 넣으면 어떻게 되는지"),
     Field("excel_compat", "엑셀 호환 모드", False, "check", group="기타",
           hint="원본 엑셀과 똑같이 계산"),
     Field("show_iplv", "IPLV 계산 (조금 느림)", False, "check", group="기타"),
@@ -1982,6 +2412,9 @@ tbody tr:last-child td{border-bottom:0}
   .msg.warn{background:#38230f;color:#ffca92;border-color:#5b3a1a}
 }
 .note{color:var(--ink3);font-size:12px;margin-top:8px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px}
+.cell{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg)}
+.cap{font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:6px}
 .head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
 .quit{flex:0 0 auto;padding:7px 15px;border:1px solid var(--line);border-radius:8px;
   background:var(--panel);color:var(--ink2);text-decoration:none;font-size:13px;
@@ -2142,6 +2575,10 @@ def render_results(res: CycleResult, values: dict[str, Any]) -> str:
     ))
     out.append("</div>")
 
+    # 냉매 교체 검토 (같은 압축기)
+    if values.get("show_retrofit"):
+        out.append(_retrofit_section(res, inp, values))
+
     # IPLV
     if values.get("show_iplv"):
         out.append('<div class="card"><h2>IPLV (부분부하 효율)</h2>')
@@ -2169,6 +2606,96 @@ def render_results(res: CycleResult, values: dict[str, Any]) -> str:
             )
         out.append("</div>")
 
+    return "".join(out)
+
+
+#: 냉매 교체 검토에서 비교할 냉매들
+RETROFIT_CANDIDATES = [
+    "R134a", "R1234ze(E)", "R1234yf", "R513A.mix", "R1233zd(E)", "R245fa",
+]
+
+
+def _retrofit_section(res: CycleResult, inp: CycleInput, values: dict) -> str:
+    """같은 압축기에 냉매만 바꿨을 때의 비교."""
+    out = ['<div class="card"><h2>냉매 교체 검토 — 같은 압축기</h2>']
+
+    # 지금 냉매를 맨 앞에 두고, 나머지를 뒤에 붙인다
+    order = [inp.refrigerant] + [
+        r for r in RETROFIT_CANDIDATES if r != inp.refrigerant
+    ]
+    try:
+        machine, points = retrofit(inp, order, stages=res.stages)
+    except (ValueError, RuntimeError) as exc:
+        return f'<div class="card"><div class="msg err">비교 실패: {esc(exc)}</div></div>'
+
+    out.append(
+        '<p class="note" style="margin:0 0 10px">'
+        f'기준 <b>{esc(machine.source_refrigerant)}</b> 로 만든 기계에 '
+        "다른 냉매를 넣었을 때입니다. 운전조건(증발 "
+        f"{inp.te:.1f}°C / 응축 {inp.tc:.1f}°C)은 그대로 두고, "
+        "압축기에서 <b>흡입 체적유량 "
+        f"{machine.suction_volume_flow_m3h:,.0f} m³/h</b> 와 "
+        f"<b>단위질량당 일 {machine.total_work:.2f} kJ/kg</b> 를 고정했습니다."
+        "</p>"
+    )
+
+    rows = []
+    for p in points:
+        if not p.ok:
+            rows.append([p.refrigerant, "—", "—", "—", "—", "—", "—", "—", "—",
+                         p.message])
+            continue
+        rows.append([
+            p.refrigerant,
+            f"{p.suction_density:.2f}",
+            f"{p.volumetric_capacity:,.0f}",
+            f"{p.capacity_rt:.1f}",
+            f"{p.capacity_ratio * 100:.0f}%",
+            f"{p.pressure_ratio:.2f}",
+            f"{p.shaft_power:.1f}",
+            f"{p.cop:.3f}",
+            f"{p.cop_ratio * 100:.0f}%",
+            f"{p.head_margin * 100:+.0f}%",
+        ])
+    out.append(_table(
+        ["냉매", "흡입밀도 [kg/m³]", "체적능력 [kJ/m³]", "능력 [RT]", "능력비",
+         "압축비", "축동력 [kW]", "COP", "COP비", "헤드여유"],
+        rows,
+    ))
+
+    for p in points:
+        if p.ok and p.message:
+            out.append(f'<div class="msg warn">{esc(p.refrigerant)}: {esc(p.message)}</div>')
+
+    out.append(
+        '<p class="note"><b>체적능력</b>은 흡입 1 m³ 당 낼 수 있는 냉동능력입니다. '
+        "같은 기계라면 능력이 이 값에 비례합니다. "
+        "<b>헤드여유</b>가 음수면 그 응축온도를 만들지 못합니다.<br>"
+        "설계점 근처에서만 맞는 근사입니다. 냉매가 바뀌면 마하수가 달라져 "
+        "실제로는 효율도 조금 변합니다.</p>"
+    )
+
+    # 냉매별 P-h 선도
+    out.append('<h2 style="margin-top:20px">냉매별 P-h 선도</h2>')
+    out.append('<div class="grid2">')
+    for p in points:
+        if not p.ok or p.result is None:
+            continue
+        out.append('<div class="cell">')
+        out.append(
+            f'<div class="cap">{esc(p.refrigerant)} &nbsp;·&nbsp; '
+            f"{p.capacity_rt:.1f} RT ({p.capacity_ratio * 100:.0f}%) "
+            f"&nbsp;·&nbsp; 압축비 {p.pressure_ratio:.2f} "
+            f"&nbsp;·&nbsp; {p.shaft_power:.1f} kW</div>"
+        )
+        out.append(ph_diagram_svg(
+            p.result,
+            options=ChartOptions(
+                width=560, height=400, isochores=False, legend=False,
+            ),
+        ))
+        out.append("</div>")
+    out.append("</div></div>")
     return "".join(out)
 
 

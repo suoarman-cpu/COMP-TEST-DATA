@@ -116,3 +116,44 @@ def format_iplv(res: IplvResult) -> str:
     out.append("  " + THIN[:64])
     out.append(f"  IPLV : COP {res.iplv_cop:.3f} / {res.iplv_kw_per_rt:.4f} kW/RT")
     return "\n".join(out)
+
+
+def format_retrofit(machine, points) -> str:
+    """같은 압축기에 냉매만 바꿨을 때의 비교표."""
+    out = ["", LINE, " 냉매 교체 검토 — 같은 압축기, 같은 운전조건", LINE, ""]
+    out.append(f"  기준 냉매        : {machine.source_refrigerant}")
+    out.append(f"  흡입 체적유량    : {machine.suction_volume_flow_m3h:9.1f} m3/h  (고정)")
+    out.append(f"  단위질량당 일    : {machine.total_work:9.2f} kJ/kg  (고정)")
+    out.append("")
+    out.append(
+        f"  {'냉매':<12}{'흡입밀도':>9}{'체적능력':>10}{'능력':>11}{'능력비':>8}"
+        f"{'압축비':>8}{'축동력':>10}{'COP':>7}{'COP비':>7}{'헤드여유':>9}"
+    )
+    out.append(
+        f"  {'':<12}{'kg/m3':>9}{'kJ/m3':>10}{'RT':>11}{'':>8}{'':>8}{'kW':>10}"
+        f"{'':>7}{'':>7}{'':>9}"
+    )
+    out.append("  " + THIN[:90])
+    for p in points:
+        if not p.ok:
+            out.append(f"  {p.refrigerant:<12}  {p.message}")
+            continue
+        out.append(
+            f"  {p.refrigerant:<12}{p.suction_density:>9.2f}"
+            f"{p.volumetric_capacity:>10.0f}{p.capacity_rt:>11.1f}"
+            f"{p.capacity_ratio * 100:>7.0f}%{p.pressure_ratio:>8.2f}"
+            f"{p.shaft_power:>10.1f}{p.cop:>7.3f}{p.cop_ratio * 100:>6.0f}%"
+            f"{p.head_margin * 100:>8.0f}%"
+        )
+    out.append("  " + THIN[:90])
+    for p in points:
+        if p.ok and p.message:
+            out.append(f"  ! {p.refrigerant}: {p.message}")
+    out.append("")
+    out.append("  읽는 법")
+    out.append("    체적능력 : 흡입 1 m3 당 낼 수 있는 냉동능력. 같은 기계면")
+    out.append("               능력이 이 값에 비례한다")
+    out.append("    헤드여유 : 이 운전조건에 필요한 일 대비 기계가 하는 일의 여유.")
+    out.append("               음수면 그 응축온도를 만들지 못한다")
+    out.append(LINE)
+    return "\n".join(out)

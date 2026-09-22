@@ -27,8 +27,9 @@ from typing import Any, Optional
 
 from .cycle import CycleInput, CycleResult, ExcelCompat, solve
 from .hx import condenser_side, evaporator_side
+from .retrofit import retrofit
 from .standards import iplv
-from .svg import ph_diagram_svg
+from .svg import ChartOptions, ph_diagram_svg
 
 #: 이미 떠 있는 프로그램을 찾을 때 뒤져볼 포트 범위
 PORT_RANGE = range(8765, 8785)
@@ -91,6 +92,9 @@ FIELDS: tuple[Field, ...] = (
 
     Field("t_cond_max", "최대 응축온도 [°C]", 70.0, step="1", group="기타"),
 
+    Field("show_retrofit", "냉매 교체 검토 (같은 압축기)", False, "check",
+          group="기타",
+          hint="지금 냉매로 만든 기계에 다른 냉매를 넣으면 어떻게 되는지"),
     Field("excel_compat", "엑셀 호환 모드", False, "check", group="기타",
           hint="원본 엑셀과 똑같이 계산"),
     Field("show_iplv", "IPLV 계산 (조금 느림)", False, "check", group="기타"),
@@ -232,6 +236,9 @@ tbody tr:last-child td{border-bottom:0}
   .msg.warn{background:#38230f;color:#ffca92;border-color:#5b3a1a}
 }
 .note{color:var(--ink3);font-size:12px;margin-top:8px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px}
+.cell{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg)}
+.cap{font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:6px}
 .head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
 .quit{flex:0 0 auto;padding:7px 15px;border:1px solid var(--line);border-radius:8px;
   background:var(--panel);color:var(--ink2);text-decoration:none;font-size:13px;
@@ -392,6 +399,10 @@ def render_results(res: CycleResult, values: dict[str, Any]) -> str:
     ))
     out.append("</div>")
 
+    # 냉매 교체 검토 (같은 압축기)
+    if values.get("show_retrofit"):
+        out.append(_retrofit_section(res, inp, values))
+
     # IPLV
     if values.get("show_iplv"):
         out.append('<div class="card"><h2>IPLV (부분부하 효율)</h2>')
@@ -419,6 +430,96 @@ def render_results(res: CycleResult, values: dict[str, Any]) -> str:
             )
         out.append("</div>")
 
+    return "".join(out)
+
+
+#: 냉매 교체 검토에서 비교할 냉매들
+RETROFIT_CANDIDATES = [
+    "R134a", "R1234ze(E)", "R1234yf", "R513A.mix", "R1233zd(E)", "R245fa",
+]
+
+
+def _retrofit_section(res: CycleResult, inp: CycleInput, values: dict) -> str:
+    """같은 압축기에 냉매만 바꿨을 때의 비교."""
+    out = ['<div class="card"><h2>냉매 교체 검토 — 같은 압축기</h2>']
+
+    # 지금 냉매를 맨 앞에 두고, 나머지를 뒤에 붙인다
+    order = [inp.refrigerant] + [
+        r for r in RETROFIT_CANDIDATES if r != inp.refrigerant
+    ]
+    try:
+        machine, points = retrofit(inp, order, stages=res.stages)
+    except (ValueError, RuntimeError) as exc:
+        return f'<div class="card"><div class="msg err">비교 실패: {esc(exc)}</div></div>'
+
+    out.append(
+        '<p class="note" style="margin:0 0 10px">'
+        f'기준 <b>{esc(machine.source_refrigerant)}</b> 로 만든 기계에 '
+        "다른 냉매를 넣었을 때입니다. 운전조건(증발 "
+        f"{inp.te:.1f}°C / 응축 {inp.tc:.1f}°C)은 그대로 두고, "
+        "압축기에서 <b>흡입 체적유량 "
+        f"{machine.suction_volume_flow_m3h:,.0f} m³/h</b> 와 "
+        f"<b>단위질량당 일 {machine.total_work:.2f} kJ/kg</b> 를 고정했습니다."
+        "</p>"
+    )
+
+    rows = []
+    for p in points:
+        if not p.ok:
+            rows.append([p.refrigerant, "—", "—", "—", "—", "—", "—", "—", "—",
+                         p.message])
+            continue
+        rows.append([
+            p.refrigerant,
+            f"{p.suction_density:.2f}",
+            f"{p.volumetric_capacity:,.0f}",
+            f"{p.capacity_rt:.1f}",
+            f"{p.capacity_ratio * 100:.0f}%",
+            f"{p.pressure_ratio:.2f}",
+            f"{p.shaft_power:.1f}",
+            f"{p.cop:.3f}",
+            f"{p.cop_ratio * 100:.0f}%",
+            f"{p.head_margin * 100:+.0f}%",
+        ])
+    out.append(_table(
+        ["냉매", "흡입밀도 [kg/m³]", "체적능력 [kJ/m³]", "능력 [RT]", "능력비",
+         "압축비", "축동력 [kW]", "COP", "COP비", "헤드여유"],
+        rows,
+    ))
+
+    for p in points:
+        if p.ok and p.message:
+            out.append(f'<div class="msg warn">{esc(p.refrigerant)}: {esc(p.message)}</div>')
+
+    out.append(
+        '<p class="note"><b>체적능력</b>은 흡입 1 m³ 당 낼 수 있는 냉동능력입니다. '
+        "같은 기계라면 능력이 이 값에 비례합니다. "
+        "<b>헤드여유</b>가 음수면 그 응축온도를 만들지 못합니다.<br>"
+        "설계점 근처에서만 맞는 근사입니다. 냉매가 바뀌면 마하수가 달라져 "
+        "실제로는 효율도 조금 변합니다.</p>"
+    )
+
+    # 냉매별 P-h 선도
+    out.append('<h2 style="margin-top:20px">냉매별 P-h 선도</h2>')
+    out.append('<div class="grid2">')
+    for p in points:
+        if not p.ok or p.result is None:
+            continue
+        out.append('<div class="cell">')
+        out.append(
+            f'<div class="cap">{esc(p.refrigerant)} &nbsp;·&nbsp; '
+            f"{p.capacity_rt:.1f} RT ({p.capacity_ratio * 100:.0f}%) "
+            f"&nbsp;·&nbsp; 압축비 {p.pressure_ratio:.2f} "
+            f"&nbsp;·&nbsp; {p.shaft_power:.1f} kW</div>"
+        )
+        out.append(ph_diagram_svg(
+            p.result,
+            options=ChartOptions(
+                width=560, height=400, isochores=False, legend=False,
+            ),
+        ))
+        out.append("</div>")
+    out.append("</div></div>")
     return "".join(out)
 
 

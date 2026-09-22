@@ -13,7 +13,8 @@ import sys
 from .config import load_input
 from .cycle import CycleInput, ExcelCompat, solve
 from .hx import condenser_side, evaporator_side
-from .report import format_hx, format_iplv, format_report
+from .retrofit import retrofit
+from .report import format_hx, format_iplv, format_report, format_retrofit
 from .standards import iplv
 
 
@@ -38,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--eta", type=float, help="단열효율(두 단 모두)")
     p.add_argument("--hx", action="store_true", help="열교환기 2차측 LMTD/UA 계산")
+    p.add_argument(
+        "--retrofit", nargs="*", metavar="냉매",
+        help="같은 압축기에 다른 냉매를 넣으면 어떻게 되는지 비교한다. "
+             "냉매를 적지 않으면 자주 쓰는 것들로 비교한다",
+    )
     p.add_argument("--iplv", action="store_true", help="IPLV(부분부하 효율) 계산")
     p.add_argument(
         "--iplv-medium", choices=("air", "water"), default="air", help="IPLV 기준"
@@ -108,6 +114,20 @@ def main(argv: list[str] | None = None) -> int:
             ),
         ]
         print(format_hx(hx))
+
+    if args.retrofit is not None or extra.get("retrofit"):
+        candidates = args.retrofit or extra.get("retrofit") or []
+        if not candidates:
+            candidates = [
+                "R134a", "R1234ze(E)", "R1234yf", "R513A.mix", "R1233zd(E)",
+            ]
+        order = [inp.refrigerant] + [c for c in candidates if c != inp.refrigerant]
+        try:
+            machine, points = retrofit(inp, order, stages=stages)
+        except (ValueError, RuntimeError) as exc:
+            print(f"냉매 교체 검토 실패: {exc}", file=sys.stderr)
+        else:
+            print(format_retrofit(machine, points))
 
     if args.iplv or extra.get("iplv"):
         medium = args.iplv_medium

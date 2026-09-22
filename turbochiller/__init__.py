@@ -23,8 +23,9 @@ from .cycle import (
     two_stage,
 )
 from .hx import HXResult, condenser_side, evaporator_side
+from .retrofit import MachineSpec, RetrofitPoint, retrofit, retrofit_one
 from .standards import IPLV_CONDITIONS, IplvResult, iplv
-from .report import format_hx, format_iplv, format_report
+from .report import format_hx, format_iplv, format_report, format_retrofit
 
 __all__ = [
     "KW_PER_RT",
@@ -46,6 +47,11 @@ __all__ = [
     "iplv",
     "format_report",
     "format_hx",
+    "format_retrofit",
+    "MachineSpec",
+    "RetrofitPoint",
+    "retrofit",
+    "retrofit_one",
     "format_iplv",
 ]
 

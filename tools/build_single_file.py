@@ -29,6 +29,7 @@ MODULES = [
     "cycle",
     "hx",
     "standards",
+    "retrofit",
     "report",
     "svg",
     "webui",
@@ -85,7 +86,7 @@ import argparse
 import math
 import sys
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Literal, Optional
+from typing import Any, Callable, Iterable, Literal, Optional, Sequence
 
 from CoolProp.CoolProp import PropsSI
 '''
