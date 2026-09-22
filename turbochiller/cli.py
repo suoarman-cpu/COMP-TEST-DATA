@@ -117,13 +117,13 @@ def main(argv: list[str] | None = None) -> int:
         opts = extra.get("impeller") if isinstance(extra.get("impeller"), dict) else {}
         sizings = [
             size_impeller(
-                st,
+                stage,
                 inp.refrigerant,
                 head_coefficient=opts.get("head_coefficient", args.psi),
                 specific_speed=opts.get("specific_speed", 0.70),
                 rpm=opts.get("rpm", args.rpm),
             )
-            for st in res.stage_results
+            for stage in res.stage_results
         ]
         print(format_impeller(sizings))
 

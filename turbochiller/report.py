@@ -46,17 +46,17 @@ def format_report(res: CycleResult) -> str:
 
     add("")
     add("[ 압축기 ]")
-    for st in res.stage_results:
-        add(f"  - {st.name}")
-        add(f"      흡입/토출 압력   : {st.p_in:9.2f} -> {st.p_out:.2f} kPa "
-            f"(압축비 {st.pressure_ratio:.3f})")
-        add(f"      흡입/토출 온도   : {st.t_in:9.2f} -> {st.t_out:.2f} °C "
-            f"(등엔트로피 {st.t_out_isentropic:.2f}°C)")
-        add(f"      단열 헤드        : {st.dh_isentropic:9.3f} kJ/kg "
-            f"(실제 {st.dh_actual:.3f}, η_is {st.eta_isentropic:.3f})")
-        add(f"      질량/체적 유량   : {st.mass_flow:9.4f} kg/s, "
-            f"{st.volume_flow_m3h:.1f} m3/h")
-        add(f"      축동력           : {st.power:9.2f} kW")
+    for stage in res.stage_results:
+        add(f"  - {stage.name}")
+        add(f"      흡입/토출 압력   : {stage.p_in:9.2f} -> {stage.p_out:.2f} kPa "
+            f"(압축비 {stage.pressure_ratio:.3f})")
+        add(f"      흡입/토출 온도   : {stage.t_in:9.2f} -> {stage.t_out:.2f} °C "
+            f"(등엔트로피 {stage.t_out_isentropic:.2f}°C)")
+        add(f"      단열 헤드        : {stage.dh_isentropic:9.3f} kJ/kg "
+            f"(실제 {stage.dh_actual:.3f}, η_is {stage.eta_isentropic:.3f})")
+        add(f"      질량/체적 유량   : {stage.mass_flow:9.4f} kg/s, "
+            f"{stage.volume_flow_m3h:.1f} m3/h")
+        add(f"      축동력           : {stage.power:9.2f} kW")
 
     add("")
     add("[ 종합 성능 ]")

@@ -2,7 +2,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 build/
-dist/
 .venv/
 venv/
 .pytest_cache/
@@ -12,4 +11,6 @@ venv/
 *.png
 !docs/*.png
 출력/
-.설치완료
+.installed
+
+# dist/ 는 배포용 단일 파일이라 일부러 커밋한다 (tools/build_single_file.py 가 만든다)

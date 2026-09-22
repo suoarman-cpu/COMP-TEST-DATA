@@ -129,7 +129,7 @@ def ph_diagram(
 
     # 압축 구간만 따로 강조한다 (터보 압축기 설계에서 제일 관심 있는 부분)
     first = res.stage_results[0]
-    for st, (a, b) in zip(res.stage_results, _compression_segments(res)):
+    for stage, (a, b) in zip(res.stage_results, _compression_segments(res)):
         ax.plot(
             [res.state(a).h, res.state(b).h],
             [res.state(a).p, res.state(b).p],
@@ -137,7 +137,7 @@ def ph_diagram(
             linewidth=3,
             zorder=4,
             solid_capstyle="round",
-            label=label("compression").capitalize() if st is first else None,
+            label=label("compression").capitalize() if stage is first else None,
         )
 
     for s, offset in zip(res.states, _label_offsets(res)):

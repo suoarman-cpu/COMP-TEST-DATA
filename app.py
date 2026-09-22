@@ -34,8 +34,6 @@ REFRIGERANTS = [
     "R1336mzz(Z)",
 ]
 
-st.set_page_config(page_title="터보 냉동기 사이클 해석", page_icon="❄", layout="wide")
-
 
 # ---------------------------------------------------------------------------
 # 입력 (왼쪽 사이드바)
@@ -178,24 +176,27 @@ def stages_table(res) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "단": st.name,
-                "흡입압력 [kPa]": round(st.p_in, 2),
-                "토출압력 [kPa]": round(st.p_out, 2),
-                "압축비": round(st.pressure_ratio, 3),
-                "흡입온도 [°C]": round(st.t_in, 2),
-                "토출온도 [°C]": round(st.t_out, 2),
-                "단열헤드 [kJ/kg]": round(st.dh_isentropic, 3),
-                "실제헤드 [kJ/kg]": round(st.dh_actual, 3),
-                "유량 [kg/s]": round(st.mass_flow, 4),
-                "흡입체적 [m³/h]": round(st.volume_flow_m3h, 1),
-                "축동력 [kW]": round(st.power, 2),
+                "단": stage.name,
+                "흡입압력 [kPa]": round(stage.p_in, 2),
+                "토출압력 [kPa]": round(stage.p_out, 2),
+                "압축비": round(stage.pressure_ratio, 3),
+                "흡입온도 [°C]": round(stage.t_in, 2),
+                "토출온도 [°C]": round(stage.t_out, 2),
+                "단열헤드 [kJ/kg]": round(stage.dh_isentropic, 3),
+                "실제헤드 [kJ/kg]": round(stage.dh_actual, 3),
+                "유량 [kg/s]": round(stage.mass_flow, 4),
+                "흡입체적 [m³/h]": round(stage.volume_flow_m3h, 1),
+                "축동력 [kW]": round(stage.power, 2),
             }
-            for st in res.stage_results
+            for stage in res.stage_results
         ]
     )
 
 
 def main() -> None:
+    st.set_page_config(
+        page_title="터보 냉동기 사이클 해석", page_icon="❄", layout="wide"
+    )
     st.title("❄ 터보 냉동기 사이클 해석")
     st.caption(
         "원본 엑셀(150RT_Cycle_Analysis)의 계산을 그대로 옮기고, "
@@ -221,7 +222,7 @@ def main() -> None:
         )
 
     with tabs[1]:
-        st.dataframe(states_table(res), use_container_width=True, hide_index=True)
+        st.dataframe(states_table(res), width="stretch", hide_index=True)
         buf = io.StringIO()
         states_table(res).to_csv(buf, index=False)
         st.download_button(
@@ -230,7 +231,7 @@ def main() -> None:
         )
 
     with tabs[2]:
-        st.dataframe(stages_table(res), use_container_width=True, hide_index=True)
+        st.dataframe(stages_table(res), width="stretch", hide_index=True)
         mc = res.max_condition
         if mc is not None:
             st.subheader(f"최대 조건 (응축 {mc.t_cond:.0f}°C)")
@@ -262,7 +263,7 @@ def main() -> None:
                         "UA [kW/K]": round(hx.ua, 2),
                     }
                 )
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     with tabs[4]:
         if not opts["impeller"]:
@@ -273,9 +274,9 @@ def main() -> None:
             )
             rows = []
             warns: list[str] = []
-            for st_ in res.stage_results:
+            for stage in res.stage_results:
                 sz = size_impeller(
-                    st_, inp.refrigerant,
+                    stage, inp.refrigerant,
                     head_coefficient=opts["psi"], specific_speed=opts["ns"],
                 )
                 rows.append(
@@ -292,7 +293,7 @@ def main() -> None:
                     }
                 )
                 warns += [f"{sz.stage_name}: {w}" for w in sz.warnings]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
             for w in warns:
                 st.warning(w)
 
@@ -320,7 +321,7 @@ def main() -> None:
                             for p in r.points
                         ]
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
                 c = st.columns(2)

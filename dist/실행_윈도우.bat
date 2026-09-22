@@ -4,17 +4,16 @@ title 터보 냉동기 사이클 해석
 setlocal
 
 rem 이 배치 파일이 있는 폴더로 이동한다.
-rem (다른 위치에서 실행돼도 requirements.txt 를 찾을 수 있게)
 cd /d "%~dp0"
+
+set "APP=터보냉동기_사이클해석.py"
 
 echo ============================================
 echo   터보 냉동기 사이클 해석 프로그램
 echo ============================================
 echo.
 
-rem 압축을 풀지 않고 ZIP 안에서 바로 실행한 경우를 잡는다.
-if not exist "requirements.txt" goto :not_extracted
-if not exist "app.py" goto :not_extracted
+if not exist "%APP%" goto :no_app
 
 rem 파이썬 확인 (py 런처를 먼저 쓰고, 없으면 python 을 쓴다)
 set "PY="
@@ -24,7 +23,7 @@ if not defined PY (
 )
 if not defined PY goto :no_python
 
-echo 사용할 파이썬: %PY%
+echo 사용할 파이썬:
 %PY% --version
 echo.
 
@@ -32,7 +31,7 @@ if not exist ".installed" (
     echo 필요한 라이브러리를 설치합니다. 처음 한 번만 몇 분 걸립니다...
     echo.
     %PY% -m pip install --upgrade pip
-    %PY% -m pip install -r requirements.txt
+    %PY% -m pip install CoolProp streamlit pandas matplotlib
     if errorlevel 1 goto :install_failed
     echo 설치 완료 > ".installed"
     echo.
@@ -41,23 +40,20 @@ if not exist ".installed" (
 echo 브라우저가 열립니다. 이 창은 닫지 마세요.
 echo 프로그램을 끝내려면 이 창에서 Ctrl+C 를 누르세요.
 echo.
-%PY% -m streamlit run app.py
+%PY% -m streamlit run "%APP%"
 echo.
 pause
 exit /b 0
 
 
-:not_extracted
-echo [오류] 프로그램 파일을 찾을 수 없습니다.
+:no_app
+echo [오류] %APP% 파일을 찾을 수 없습니다.
 echo.
 echo   지금 위치: %CD%
 echo.
-echo   압축(ZIP)을 풀지 않고 바로 실행하신 것 같습니다.
-echo.
-echo   해결 방법:
-echo     1. ZIP 파일에서 마우스 오른쪽 클릭
-echo     2. "압축 풀기" 또는 "모두 압축 해제" 선택
-echo     3. 풀린 폴더 안에 있는 이 파일을 다시 두 번 클릭
+echo   이 배치 파일과 %APP% 이
+echo   "같은 폴더" 에 있어야 합니다.
+echo   두 파일을 같은 폴더에 넣고 다시 실행해 주세요.
 echo.
 pause
 exit /b 1

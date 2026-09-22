@@ -80,10 +80,13 @@ class CycleInput:
     (엑셀 시트의 '√(P1P2)' 셀과 같은 개념. 압축비를 두 단에 고르게 나누는 값)
     부분부하처럼 응축온도가 바뀌는 계산에서는 None 으로 두는 편이 안전하다.
     """
-    subcond_mass_ratio: Optional[float] = 0.2
+    subcond_mass_ratio: Optional[float] = None
     """중간단 추가 유량비 x = m_eco / m_evap.
 
-    None 으로 두면 이코노마이저 에너지 밸런스로 직접 계산한다.
+    기본값 None 은 이코노마이저 에너지 밸런스로 직접 계산한다는 뜻이다.
+    숫자를 직접 넣으면 (원본 엑셀처럼) 그 값을 그대로 쓰는데,
+    그러면 이코노마이저 에너지 수지가 맞지 않을 수 있다.
+    결과의 energy_balance_error 로 확인할 것.
     """
 
     # --- 최대 운전조건 (기동/고외기 보호 설계점) ---

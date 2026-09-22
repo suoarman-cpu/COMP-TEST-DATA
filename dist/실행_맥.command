@@ -1,10 +1,10 @@
 #!/bin/bash
 # 맥에서 두 번 눌러 실행합니다.
-# 처음 한 번은 "보안 때문에 열 수 없음" 이 뜰 수 있습니다.
-#   -> 시스템 설정 > 개인정보 보호 및 보안 > "확인 없이 열기" 를 누르세요.
+# 이 파일과 터보냉동기_사이클해석.py 가 같은 폴더에 있어야 합니다.
 
-# 이 스크립트가 있는 폴더로 이동한다.
 cd "$(dirname "$0")" || exit 1
+
+APP="터보냉동기_사이클해석.py"
 
 echo "============================================"
 echo "  터보 냉동기 사이클 해석 프로그램"
@@ -17,15 +17,12 @@ pause_and_exit() {
     exit "$1"
 }
 
-# 압축을 풀지 않고 바로 실행한 경우를 잡는다.
-if [ ! -f "requirements.txt" ] || [ ! -f "app.py" ]; then
-    echo "[오류] 프로그램 파일을 찾을 수 없습니다."
+if [ ! -f "$APP" ]; then
+    echo "[오류] $APP 파일을 찾을 수 없습니다."
     echo
     echo "  지금 위치: $(pwd)"
     echo
-    echo "  압축(ZIP)을 풀지 않고 바로 실행하신 것 같습니다."
-    echo "  ZIP 파일을 두 번 눌러 압축을 푼 뒤,"
-    echo "  풀린 폴더 안의 이 파일을 다시 실행해 주세요."
+    echo "  이 파일과 $APP 이 같은 폴더에 있어야 합니다."
     pause_and_exit 1
 fi
 
@@ -33,7 +30,6 @@ if command -v python3 > /dev/null 2>&1; then
     PY=python3
 else
     echo "[오류] 파이썬이 설치되어 있지 않습니다."
-    echo
     echo "  https://www.python.org/downloads/ 에서 받아 설치한 뒤 다시 실행해 주세요."
     pause_and_exit 1
 fi
@@ -45,12 +41,11 @@ if [ ! -f ".installed" ]; then
     echo "필요한 라이브러리를 설치합니다. 처음 한 번만 몇 분 걸립니다..."
     echo
     $PY -m pip install --upgrade pip
-    if ! $PY -m pip install -r requirements.txt; then
+    if ! $PY -m pip install CoolProp streamlit pandas matplotlib; then
         echo
         echo "[오류] 라이브러리 설치에 실패했습니다."
         echo "  - 인터넷 연결을 확인해 주세요."
         echo "  - 회사 네트워크라면 방화벽/프록시 때문일 수 있습니다."
-        echo "  - 위에 나온 오류 내용을 그대로 알려주시면 도와드리겠습니다."
         pause_and_exit 1
     fi
     echo "설치 완료" > .installed
@@ -60,4 +55,4 @@ fi
 echo "브라우저가 열립니다. 이 창은 닫지 마세요."
 echo "프로그램을 끝내려면 이 창에서 Control+C 를 누르세요."
 echo
-$PY -m streamlit run app.py
+$PY -m streamlit run "$APP"
