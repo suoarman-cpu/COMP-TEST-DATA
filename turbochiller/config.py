@@ -34,7 +34,7 @@ def _load_raw(path: Path) -> dict[str, Any]:
 def load_input(path: str | Path) -> tuple[CycleInput, dict[str, Any]]:
     """입력 파일을 읽어 CycleInput 과 나머지 설정을 돌려준다.
 
-    사이클 입력에 해당하지 않는 키(stages, impeller, iplv 등)는
+    사이클 입력에 해당하지 않는 키(stages, hx, iplv 등)는
     두 번째 반환값에 그대로 담아 준다.
     """
     path = Path(path)

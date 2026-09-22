@@ -104,7 +104,7 @@ def test_bad_number_falls_back_to_default() -> None:
 
 def test_page_renders_all_sections() -> None:
     html = render_page({})
-    for section in ("P-h 선도", "상태점", "압축기", "열교환기", "임펠러 개략 치수"):
+    for section in ("P-h 선도", "상태점", "압축기", "열교환기"):
         assert section in html, f"'{section}' 구역이 없다"
     assert "<svg" in html
     assert "계산할 수 없는 조건" not in html

@@ -28,7 +28,6 @@ MODULES = [
     "props",
     "cycle",
     "hx",
-    "impeller",
     "standards",
     "report",
     "svg",
@@ -193,7 +192,6 @@ def _main() -> None:
     parser.add_argument("--stages", type=int, choices=(1, 2), default=2, help="압축 단수")
     parser.add_argument("--t-evap", type=float, help="증발온도 [°C]")
     parser.add_argument("--t-cond", type=float, help="응축온도 [°C]")
-    parser.add_argument("--rpm", type=float, help="축 회전수 고정 [rpm]")
     args = parser.parse_args()
 
     if args.text:
@@ -203,9 +201,7 @@ def _main() -> None:
             t_evap=args.t_evap,
             t_cond=args.t_cond,
         )
-        result = solve(inp, stages=args.stages)
-        print(format_report(result))
-        print(format_impeller(size_machine(result, Given(rpm=args.rpm))))
+        print(format_report(solve(inp, stages=args.stages)))
         return
 
     serve(port=args.port, open_browser=not args.no_browser)

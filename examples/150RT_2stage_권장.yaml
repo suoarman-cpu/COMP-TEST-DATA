@@ -32,15 +32,6 @@ t_cond_max: 70.0
 eta_is_max: 0.80
 
 hx: true
-impeller:
-  # psi(압력계수) · rpm(회전수) · diameter_mm(외경) 은 서로 묶여 있어
-  # 셋 중 둘만 정하면 나머지가 따라 나온다. 아무것도 안 정하면
-  # 아래 비속도로 회전수를 잡는다.
-  specific_speed: 0.70
-  # head_coefficient: 0.60     # psi 를 직접 정하고 싶을 때
-  # rpm: 15000                 # 모터/인버터 회전수가 정해져 있을 때
-  # diameter_mm: 170           # 기존 임펠러를 쓸 수 있는지 볼 때
-  # eye_diameter_mm: 90        # 흡입구가 정해져 있을 때
-  # geared: false              # true 면 기어 내장형(단별 회전수 다름)
+
 iplv:
   medium: air

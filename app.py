@@ -19,8 +19,6 @@ from turbochiller import (
     condenser_side,
     evaporator_side,
     iplv,
-    Given,
-    size_machine,
     solve,
 )
 from turbochiller.plot import ph_diagram
@@ -91,12 +89,7 @@ def read_inputs() -> tuple[CycleInput, int, dict]:
     sb.subheader("추가 계산")
     opts = {
         "hx": sb.checkbox("열교환기 2차측 (LMTD / UA)", value=True),
-        "impeller": sb.checkbox("임펠러 개략 치수", value=True),
         "iplv": sb.checkbox("IPLV (부분부하 효율)", value=False),
-        "psi": sb.number_input("압력계수 ψ (0이면 자동)", 0.0, 0.9, 0.0, step=0.01),
-        "rpm": sb.number_input("축 회전수 [rpm] (0이면 자동)", 0, 80000, 0, step=500),
-        "ns": sb.slider("목표 비속도 Ns", 0.40, 1.00, 0.70, step=0.01),
-        "geared": sb.checkbox("기어 내장형 (단별 회전수 다름)", value=False),
         "medium": sb.selectbox("IPLV 기준", ("air", "water"),
                                format_func=lambda m: "공랭" if m == "air" else "수냉"),
     }
@@ -203,7 +196,7 @@ def main() -> None:
     st.title("❄ 터보 냉동기 사이클 해석")
     st.caption(
         "원본 엑셀(150RT_Cycle_Analysis)의 계산을 그대로 옮기고, "
-        "이코노마이저 에너지 밸런스와 임펠러 개략 설계를 더했다."
+        "이코노마이저 에너지 밸런스를 바로잡고 검증 테스트를 붙였다."
     )
 
     inp, stages, opts = read_inputs()
@@ -216,7 +209,7 @@ def main() -> None:
 
     show_summary(res)
 
-    tabs = st.tabs(["P-h 선도", "상태점", "압축기", "열교환기", "임펠러", "IPLV"])
+    tabs = st.tabs(["P-h 선도", "상태점", "압축기", "열교환기", "IPLV"])
 
     with tabs[0]:
         st.pyplot(ph_diagram(res, figsize=(9, 6.5)))
@@ -269,49 +262,6 @@ def main() -> None:
             st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     with tabs[4]:
-        if not opts["impeller"]:
-            st.info("왼쪽에서 '임펠러 개략 치수'를 켜면 계산한다.")
-        else:
-            st.caption(
-                "무차원수로 잡은 1차 근사다. 깃 형상·확산기·CFD 로 다시 확인해야 한다."
-            )
-            machine = size_machine(
-                res,
-                Given(
-                    head_coefficient=opts["psi"] or None,
-                    rpm=opts["rpm"] or None,
-                    specific_speed=opts["ns"],
-                ),
-                geared=opts["geared"],
-            )
-            st.info(
-                f"구동 방식 **{machine.drive}** · 축 회전수 **{machine.rpm:,.0f} rpm**"
-                + ("  (모든 단 공통)" if machine.drive == "단일축 직결" else "")
-            )
-            st.dataframe(
-                pd.DataFrame(
-                    [
-                        {
-                            "단": z.stage_name,
-                            "임펠러 외경 [mm]": round(z.diameter_mm, 1),
-                            "선단 주속 [m/s]": round(z.tip_speed, 1),
-                            "선단 마하수": round(z.tip_mach, 3),
-                            "흡입구 외경 [mm]": round(z.eye_diameter_mm, 1),
-                            "흡입구 마하수": round(z.eye_mach, 3),
-                            "압력계수 ψ": round(z.head_coefficient, 3),
-                            "비속도 Ns": round(z.specific_speed, 3),
-                            "유량계수 φ": round(z.flow_coefficient, 4),
-                        }
-                        for z in machine.stages
-                    ]
-                ),
-                width="stretch",
-                hide_index=True,
-            )
-            for w in machine.warnings:
-                st.warning(w)
-
-    with tabs[5]:
         if not opts["iplv"]:
             st.info("왼쪽에서 'IPLV'를 켜면 계산한다. (부하점 4개를 다시 풀어서 조금 걸린다)")
         else:

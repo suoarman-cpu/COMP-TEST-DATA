@@ -135,7 +135,7 @@ def t_crit(fluid: str) -> float:
 
 
 def a_tp(fluid: str, t_c: float, p_kpa: float) -> float:
-    """음속 [m/s] (T, P 기준). 임펠러 마하수 계산에 쓴다."""
+    """음속 [m/s] (T, P 기준). 마하수 계산에 쓴다."""
     return _props("A", "T", t_c + T0, "P", p_kpa * 1000.0, fluid)
 
 

@@ -1,7 +1,7 @@
 """명령줄 실행기.
 
     python -m turbochiller examples/150RT_2stage_R1234ze.yaml
-    python -m turbochiller examples/150RT_2stage_R1234ze.yaml --iplv --impeller
+    python -m turbochiller examples/150RT_2stage_R1234ze.yaml --iplv --hx
     python -m turbochiller --refrigerant R134a --capacity 200 --stages 2
 """
 
@@ -13,8 +13,7 @@ import sys
 from .config import load_input
 from .cycle import CycleInput, ExcelCompat, solve
 from .hx import condenser_side, evaporator_side
-from .impeller import Given, size_machine
-from .report import format_hx, format_impeller, format_iplv, format_report
+from .report import format_hx, format_iplv, format_report
 from .standards import iplv
 
 
@@ -39,17 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--eta", type=float, help="단열효율(두 단 모두)")
     p.add_argument("--hx", action="store_true", help="열교환기 2차측 LMTD/UA 계산")
-    p.add_argument("--impeller", action="store_true", help="임펠러 개략 치수 산정")
-    p.add_argument("--rpm", type=float, help="축 회전수 고정 [rpm]")
-    p.add_argument(
-        "--geared", action="store_true",
-        help="기어 내장형으로 보고 단마다 회전수를 따로 잡는다 "
-             "(기본은 단일축 직결 — 모든 단 회전수 동일)",
-    )
-    p.add_argument("--psi", type=float, help="임펠러 압력계수 psi (기본 0.60)")
-    p.add_argument("--d2", type=float, help="1단 임펠러 외경 고정 [mm]")
-    p.add_argument("--d-eye", type=float, help="1단 흡입구 외경 고정 [mm]")
-    p.add_argument("--ns", type=float, default=0.70, help="목표 비속도 (기본 0.70)")
     p.add_argument("--iplv", action="store_true", help="IPLV(부분부하 효율) 계산")
     p.add_argument(
         "--iplv-medium", choices=("air", "water"), default="air", help="IPLV 기준"
@@ -120,24 +108,6 @@ def main(argv: list[str] | None = None) -> int:
             ),
         ]
         print(format_hx(hx))
-
-    if args.impeller or extra.get("impeller"):
-        opts = extra.get("impeller") if isinstance(extra.get("impeller"), dict) else {}
-        def mm(value):
-            return None if value is None else value / 1000.0
-
-        machine = size_machine(
-            res,
-            Given(
-                head_coefficient=opts.get("head_coefficient", args.psi),
-                rpm=opts.get("rpm", args.rpm),
-                diameter=mm(opts.get("diameter_mm", args.d2)),
-                eye_diameter=mm(opts.get("eye_diameter_mm", args.d_eye)),
-                specific_speed=opts.get("specific_speed", args.ns),
-            ),
-            geared=bool(opts.get("geared", args.geared)),
-        )
-        print(format_impeller(machine))
 
     if args.iplv or extra.get("iplv"):
         medium = args.iplv_medium
