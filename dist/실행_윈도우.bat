@@ -24,23 +24,25 @@ if not defined PY (
 if not defined PY goto :no_python
 
 echo 사용할 파이썬:
-%PY% --version
+%PY% -c "import platform,sys; print('  ', sys.version.split()[0], platform.machine(), platform.architecture()[0])"
 echo.
 
-if not exist ".installed" (
-    echo 필요한 라이브러리를 설치합니다. 처음 한 번만 몇 분 걸립니다...
-    echo.
-    %PY% -m pip install --upgrade pip
-    %PY% -m pip install CoolProp streamlit pandas matplotlib
-    if errorlevel 1 goto :install_failed
-    echo 설치 완료 > ".installed"
-    echo.
-)
+rem CoolProp 이 이미 있으면 설치 단계를 건너뛴다.
+%PY% -c "import CoolProp" > nul 2>&1
+if not errorlevel 1 goto :run
 
+echo 냉매 물성 라이브러리(CoolProp)를 설치합니다. 처음 한 번만 몇 분 걸립니다...
+echo.
+%PY% -m pip install --upgrade pip
+%PY% -m pip install CoolProp
+if errorlevel 1 goto :install_failed
+echo.
+
+:run
 echo 브라우저가 열립니다. 이 창은 닫지 마세요.
 echo 프로그램을 끝내려면 이 창에서 Ctrl+C 를 누르세요.
 echo.
-%PY% -m streamlit run "%APP%"
+%PY% "%APP%"
 echo.
 pause
 exit /b 0
@@ -65,20 +67,16 @@ echo.
 echo   https://www.python.org/downloads/ 에서 받아 설치한 뒤 다시 실행해 주세요.
 echo   설치 화면 맨 아래 "Add Python to PATH" 를 꼭 체크하세요.
 echo.
-echo   이미 설치하셨다면, 설치 관리자를 다시 열어
-echo   "Modify" 에서 "Add Python to environment variables" 를 켜 주세요.
-echo.
 pause
 exit /b 1
 
 
 :install_failed
 echo.
-echo [오류] 라이브러리 설치에 실패했습니다.
+echo [오류] CoolProp 설치에 실패했습니다.
 echo.
-echo   - 인터넷 연결을 확인해 주세요.
-echo   - 회사 네트워크라면 방화벽/프록시 때문일 수 있습니다.
-echo   - 위에 빨간 글씨로 나온 내용을 그대로 알려주시면 도와드리겠습니다.
+echo   위에 나온 빨간 글씨를 그대로 알려주시면 도와드리겠습니다.
+echo   (회사 네트워크의 방화벽/프록시 때문일 수도 있습니다)
 echo.
 pause
 exit /b 1

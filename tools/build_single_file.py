@@ -19,6 +19,11 @@ PKG = ROOT / "turbochiller"
 OUT = ROOT / "dist" / "터보냉동기_사이클해석.py"
 
 #: 의존 순서대로. 앞에 있는 모듈이 뒤 모듈에서 쓰인다.
+#:
+#: plot.py(matplotlib)와 app.py(streamlit)는 일부러 뺐다.
+#: streamlit 은 pyarrow 를 끌고 오는데, pyarrow 는 32비트·ARM 윈도우용
+#: 설치 파일이 없어서 그런 PC 에서는 설치가 아예 안 된다.
+#: 대신 파이썬 내장 기능만 쓰는 webui.py 를 넣어서, CoolProp 하나만 있으면 돌게 했다.
 MODULES = [
     "props",
     "cycle",
@@ -26,7 +31,8 @@ MODULES = [
     "impeller",
     "standards",
     "report",
-    "plot",
+    "svg",
+    "webui",
 ]
 
 #: 패키지 내부를 가리키는 import 만 지운다 (외부 라이브러리 import 는 남긴다)
@@ -38,9 +44,19 @@ MODULE_ALIASES = """
 # 원래는 turbochiller.props 처럼 모듈로 나뉘어 있었다.
 # 한 파일로 합치면서, 코드 안의 `props.xxx` 호출이 그대로 동작하도록
 # 이 파일 자신을 props 라는 이름으로도 가리키게 해 둔다.
-import sys as _sys
 
-props = _sys.modules[__name__]
+
+class _SelfModule:
+    \"\"\"`props.h_tp(...)` 같은 호출을 이 파일 안의 같은 이름 함수로 연결한다.\"\"\"
+
+    def __getattr__(self, name: str):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(f"{name} 을(를) 찾을 수 없다") from None
+
+
+props = _SelfModule()
 """
 
 HEADER = '''"""터보 냉동기 사이클 해석 — 파일 하나로 합친 배포판.
@@ -48,11 +64,16 @@ HEADER = '''"""터보 냉동기 사이클 해석 — 파일 하나로 합친 배
 이 파일 하나만 있으면 돌아간다. 폴더 구조가 필요 없다.
 
 쓰는 법
-    화면으로 보기 :  streamlit run 터보냉동기_사이클해석.py
-    바로 계산만   :  python 터보냉동기_사이클해석.py
+    화면으로 보기 :  python 터보냉동기_사이클해석.py
+                     (브라우저가 자동으로 열린다)
+    계산만 찍기   :  python 터보냉동기_사이클해석.py --text
 
-필요한 라이브러리
-    pip install CoolProp streamlit pandas matplotlib
+설치할 것은 하나뿐이다
+    pip install CoolProp
+
+화면은 파이썬에 처음부터 들어 있는 기능(http.server)으로 만들었다.
+streamlit / pandas / matplotlib 이 필요 없어서, 32비트나 ARM 윈도우처럼
+pyarrow 가 깔리지 않는 PC 에서도 그대로 돌아간다.
 
 원본은 turbochiller 패키지다 (github: suoarman-cpu/COMP-TEST-DATA).
 이 파일은 tools/build_single_file.py 가 자동으로 만든 것이라,
@@ -62,23 +83,34 @@ HEADER = '''"""터보 냉동기 사이클 해석 — 파일 하나로 합친 배
 from __future__ import annotations
 
 import argparse
-import io
 import math
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Callable, Literal, Optional, Sequence
+from typing import Any, Callable, Literal, Optional
 
 from CoolProp.CoolProp import PropsSI
 '''
 
 
 def strip_module(path: Path) -> str:
-    """모듈 하나에서 헤더(주석·import)를 걷어내고 본문만 남긴다."""
+    """모듈 하나에서 헤더(주석·import)와 __main__ 블록을 걷어내고 본문만 남긴다."""
     lines = path.read_text(encoding="utf-8").split("\n")
     out: list[str] = []
     in_docstring = False
     docstring_done = False
+    in_main_block = False
 
     for line in lines:
+        # `if __name__ == "__main__":` 블록은 통째로 버린다.
+        # 남겨두면 합친 파일 중간에서 그 모듈의 실행이 먼저 일어나 버린다.
+        if in_main_block:
+            if line.strip() and not line[0].isspace():
+                in_main_block = False
+            else:
+                continue
+        if line.startswith("if __name__ =="):
+            in_main_block = True
+            continue
+
         stripped = line.strip()
 
         # 파일 맨 앞 docstring 은 주석으로 바꿔 남겨 둔다 (설명이 아까우니)
@@ -132,20 +164,6 @@ def build() -> Path:
         parts.append(f"\n\n# {'=' * 74}\n# {name}.py\n# {'=' * 74}\n")
         parts.append(strip_module(path))
 
-    # streamlit 화면 (app.py)
-    app = ROOT / "app.py"
-    parts.append(f"\n\n# {'=' * 74}\n# app.py — streamlit 화면\n# {'=' * 74}\n")
-    app_body = strip_module(app)
-    # app.py 는 turbochiller 에서 import 하던 것을 전부 지운다
-    app_body = re.sub(
-        r"^from turbochiller[\w.]* import \([^)]*\)$|^from turbochiller[\w.]* import .*$",
-        "",
-        app_body,
-        flags=re.MULTILINE,
-    )
-    app_body = app_body.replace("if __name__ == \"__main__\":\n    main()", "")
-    parts.append(app_body.strip("\n"))
-
     parts.append(ENTRYPOINT)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -159,21 +177,16 @@ ENTRYPOINT = '''
 # 실행 진입점
 # ==========================================================================
 
-def _streamlit_is_running() -> bool:
-    """`streamlit run` 으로 실행됐는지 확인한다."""
-    try:
-        from streamlit.runtime import exists
-
-        return exists()
-    except Exception:
-        return False
-
-
-def _print_default_report() -> None:
-    """화면 없이 그냥 실행했을 때 기본 조건으로 한 번 계산해 보여준다."""
+def _main() -> None:
     parser = argparse.ArgumentParser(
         description="터보 냉동기 사이클 해석 (파일 하나 배포판)"
     )
+    parser.add_argument(
+        "--text", action="store_true",
+        help="화면 대신 계산 결과를 글자로만 찍는다",
+    )
+    parser.add_argument("--port", type=int, help="웹 화면 포트 (기본: 8765부터 빈 곳)")
+    parser.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않는다")
     parser.add_argument("--refrigerant", default="R1234ze(E)", help="냉매")
     parser.add_argument("--capacity", type=float, default=150.0, help="냉동능력 [RT]")
     parser.add_argument("--stages", type=int, choices=(1, 2), default=2, help="압축 단수")
@@ -181,22 +194,21 @@ def _print_default_report() -> None:
     parser.add_argument("--t-cond", type=float, help="응축온도 [°C]")
     args = parser.parse_args()
 
-    inp = CycleInput(
-        refrigerant=args.refrigerant,
-        capacity_rt=args.capacity,
-        t_evap=args.t_evap,
-        t_cond=args.t_cond,
-    )
-    print(format_report(solve(inp, stages=args.stages)))
-    print()
-    print("화면으로 보시려면:  streamlit run 터보냉동기_사이클해석.py")
+    if args.text:
+        inp = CycleInput(
+            refrigerant=args.refrigerant,
+            capacity_rt=args.capacity,
+            t_evap=args.t_evap,
+            t_cond=args.t_cond,
+        )
+        print(format_report(solve(inp, stages=args.stages)))
+        return
+
+    serve(port=args.port, open_browser=not args.no_browser)
 
 
 if __name__ == "__main__":
-    if _streamlit_is_running():
-        main()
-    else:
-        _print_default_report()
+    _main()
 '''
 
 

@@ -1,13 +1,17 @@
-# 계산에 꼭 필요한 것
+# --- 꼭 필요한 것 (이것 하나면 배포판이 돌아간다) ---
 CoolProp>=6.4          # 냉매 물성 (엑셀의 REFPROP/CoolProp 애드인 대체)
 
-# 입력 파일(.yaml)을 쓸 때
-PyYAML>=6.0
-
-# 웹 화면(app.py)과 P-h 선도를 쓸 때
+# --- 아래는 있으면 좋지만 없어도 되는 것들 ---
+# streamlit 화면을 쓸 때. pyarrow 를 끌고 오므로 32비트/ARM 윈도우에서는
+# 설치가 안 될 수 있다. 그런 PC 는 `python -m turbochiller.webui` 를 쓰면 된다.
 streamlit>=1.30
 pandas>=2.0
+
+# matplotlib 판 P-h 선도를 쓸 때 (내장 SVG 판은 아무것도 필요 없다)
 matplotlib>=3.7
+
+# .yaml 입력 파일을 쓸 때 (.json 으로 저장하면 없어도 된다)
+PyYAML>=6.0
 
 # 테스트를 돌릴 때
 pytest>=7.0

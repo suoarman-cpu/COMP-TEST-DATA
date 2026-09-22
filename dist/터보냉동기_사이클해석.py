@@ -3,11 +3,16 @@
 이 파일 하나만 있으면 돌아간다. 폴더 구조가 필요 없다.
 
 쓰는 법
-    화면으로 보기 :  streamlit run 터보냉동기_사이클해석.py
-    바로 계산만   :  python 터보냉동기_사이클해석.py
+    화면으로 보기 :  python 터보냉동기_사이클해석.py
+                     (브라우저가 자동으로 열린다)
+    계산만 찍기   :  python 터보냉동기_사이클해석.py --text
 
-필요한 라이브러리
-    pip install CoolProp streamlit pandas matplotlib
+설치할 것은 하나뿐이다
+    pip install CoolProp
+
+화면은 파이썬에 처음부터 들어 있는 기능(http.server)으로 만들었다.
+streamlit / pandas / matplotlib 이 필요 없어서, 32비트나 ARM 윈도우처럼
+pyarrow 가 깔리지 않는 PC 에서도 그대로 돌아간다.
 
 원본은 turbochiller 패키지다 (github: suoarman-cpu/COMP-TEST-DATA).
 이 파일은 tools/build_single_file.py 가 자동으로 만든 것이라,
@@ -17,10 +22,9 @@
 from __future__ import annotations
 
 import argparse
-import io
 import math
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Callable, Literal, Optional, Sequence
+from typing import Any, Callable, Literal, Optional
 
 from CoolProp.CoolProp import PropsSI
 
@@ -29,9 +33,19 @@ from CoolProp.CoolProp import PropsSI
 # 원래는 turbochiller.props 처럼 모듈로 나뉘어 있었다.
 # 한 파일로 합치면서, 코드 안의 `props.xxx` 호출이 그대로 동작하도록
 # 이 파일 자신을 props 라는 이름으로도 가리키게 해 둔다.
-import sys as _sys
 
-props = _sys.modules[__name__]
+
+class _SelfModule:
+    """`props.h_tp(...)` 같은 호출을 이 파일 안의 같은 이름 함수로 연결한다."""
+
+    def __getattr__(self, name: str):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(f"{name} 을(를) 찾을 수 없다") from None
+
+
+props = _SelfModule()
 
 
 
@@ -1220,228 +1234,284 @@ def format_iplv(res: IplvResult) -> str:
 
 
 # ==========================================================================
-# plot.py
+# svg.py
 # ==========================================================================
 
-if TYPE_CHECKING:  # pragma: no cover
-    from matplotlib.figure import Figure
-
-# 색은 dataviz 기준 팔레트의 categorical 1·2번 슬롯을 쓴다 (CVD 검증 통과).
-COLOR_CYCLE = "#2a78d6"     # 사이클 경로
-COLOR_COMPRESSION = "#eb6834"  # 압축 구간
-COLOR_DOME_LIGHT = "#b8b7b0"   # 포화선 (배경 참조선이라 무채색)
-COLOR_TEXT = "#52514e"
-COLOR_SURFACE = "#fcfcfb"
-
-#: 윈도우/맥/리눅스에서 흔한 한글 폰트 후보
-KOREAN_FONTS = (
-    "Malgun Gothic",        # 윈도우
-    "AppleGothic",          # 맥
-    "Apple SD Gothic Neo",  # 맥
-    "NanumGothic",
-    "Noto Sans CJK KR",
-    "Noto Sans KR",
-)
-
-#: 한글 폰트가 없을 때 쓰는 영문 라벨
-LABELS = {
-    "saturation": ("포화선 (saturation)", "Saturation"),
-    "cycle": ("사이클 경로", "Cycle"),
-    "compression": ("압축", "compression"),
-    "stage1": ("1단", "1st stage"),
-    "stage2": ("2단", "2nd stage"),
+# 검증된 색 (light / dark 두 벌)
+COLORS_LIGHT = {
+    "cycle": "#2a78d6",
+    "compression": "#eb6834",
+    "dome": "#b8b7b0",
+    "grid": "#e5e4df",
+    "axis": "#d8d7d1",
+    "text": "#52514e",
+    "text_strong": "#0b0b0b",
+    "surface": "#fcfcfb",
+}
+COLORS_DARK = {
+    "cycle": "#3987e5",
+    "compression": "#d95926",
+    "dome": "#6b6a64",
+    "grid": "#2c2c2a",
+    "axis": "#3a3a37",
+    "text": "#c3c2b7",
+    "text_strong": "#ffffff",
+    "surface": "#1a1a19",
 }
 
 
-def setup_korean_font() -> bool:
-    """한글이 깨지지 않게 폰트를 잡아준다. 잡았으면 True.
+@dataclass
+class _Box:
+    """그림 좌표계. 데이터 좌표를 화면 좌표로 옮긴다."""
 
-    설치된 한글 폰트가 없으면 그대로 두고 False 를 돌려준다.
-    (그 경우 그래프 글자는 영문으로 나간다)
-    """
-    import matplotlib
-    from matplotlib import font_manager
+    width: float
+    height: float
+    pad_left: float
+    pad_right: float
+    pad_top: float
+    pad_bottom: float
+    h_min: float
+    h_max: float
+    log_p_min: float
+    log_p_max: float
 
-    available = {f.name for f in font_manager.fontManager.ttflist}
-    for name in KOREAN_FONTS:
-        if name in available:
-            matplotlib.rcParams["font.family"] = name
-            matplotlib.rcParams["axes.unicode_minus"] = False
-            return True
-    return False
+    def x(self, h: float) -> float:
+        span = self.h_max - self.h_min or 1.0
+        inner = self.width - self.pad_left - self.pad_right
+        return self.pad_left + (h - self.h_min) / span * inner
 
-
-def saturation_dome(
-    refrigerant: str, points: int = 120
-) -> tuple[list[float], list[float], list[float], list[float]]:
-    """포화액·포화증기 선을 (h, P) 로 돌려준다.
-
-    반환: (h_liquid, p_liquid, h_vapor, p_vapor)
-    """
-    t_max = props.t_crit(refrigerant) - 0.5
-    t_min = max(-80.0, t_max - 160.0)
-    step = (t_max - t_min) / (points - 1)
-
-    hl: list[float] = []
-    pl: list[float] = []
-    hv: list[float] = []
-    pv: list[float] = []
-    for i in range(points):
-        t = t_min + i * step
-        try:
-            p = props.p_sat(refrigerant, t, q=1)
-            hl.append(props.h_sat(refrigerant, t, 0))
-            pl.append(p)
-            hv.append(props.h_sat(refrigerant, t, 1))
-            pv.append(p)
-        except Exception:  # 임계점 근처에서는 계산이 안 될 수 있다
-            continue
-    return hl, pl, hv, pv
+    def y(self, p: float) -> float:
+        span = self.log_p_max - self.log_p_min or 1.0
+        inner = self.height - self.pad_top - self.pad_bottom
+        frac = (math.log10(max(p, 1e-6)) - self.log_p_min) / span
+        return self.height - self.pad_bottom - frac * inner
 
 
-def _cycle_path(res: CycleResult) -> tuple[list[float], list[float]]:
-    """상태점을 순서대로 이어 닫힌 경로를 만든다."""
-    h = [s.h for s in res.states]
-    p = [s.p for s in res.states]
-    return h + h[:1], p + p[:1]
-
-
-def ph_diagram(
-    res: CycleResult,
-    figsize: tuple[float, float] = (8.0, 6.0),
-    title: Optional[str] = None,
-) -> "Figure":
-    """사이클을 P-h 선도 위에 그린다."""
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError as exc:  # pragma: no cover - 안내용
-        raise SystemExit(
-            "P-h 선도를 그리려면 matplotlib 이 필요하다: pip install matplotlib"
-        ) from exc
-
-    korean = setup_korean_font()
-
-    def label(key: str) -> str:
-        ko, en = LABELS[key]
-        return ko if korean else en
-
-    fig, ax = plt.subplots(figsize=figsize)
-    fig.patch.set_facecolor(COLOR_SURFACE)
-    ax.set_facecolor(COLOR_SURFACE)
-
-    hl, pl, hv, pv = saturation_dome(res.refrigerant)
-    ax.plot(hl, pl, color=COLOR_DOME_LIGHT, linewidth=2, zorder=1)
-    ax.plot(hv, pv, color=COLOR_DOME_LIGHT, linewidth=2, zorder=1,
-            label=label("saturation"))
-
-    h, p = _cycle_path(res)
-    ax.plot(h, p, color=COLOR_CYCLE, linewidth=2, zorder=3, label=label("cycle"))
-
-    # 압축 구간만 따로 강조한다 (터보 압축기 설계에서 제일 관심 있는 부분)
-    first = res.stage_results[0]
-    for stage, (a, b) in zip(res.stage_results, _compression_segments(res)):
-        ax.plot(
-            [res.state(a).h, res.state(b).h],
-            [res.state(a).p, res.state(b).p],
-            color=COLOR_COMPRESSION,
-            linewidth=3,
-            zorder=4,
-            solid_capstyle="round",
-            label=label("compression").capitalize() if stage is first else None,
-        )
-
-    for s, offset in zip(res.states, _label_offsets(res)):
-        ax.plot(s.h, s.p, "o", color=COLOR_CYCLE, markersize=8,
-                markeredgecolor=COLOR_SURFACE, markeredgewidth=2, zorder=5)
-        ax.annotate(
-            str(s.no),
-            (s.h, s.p),
-            textcoords="offset points",
-            xytext=offset,
-            fontsize=10,
-            fontweight="bold",
-            color=COLOR_TEXT,
-            zorder=6,
-        )
-
-    ax.set_yscale("log")
-    ax.set_xlabel("Enthalpy  h [kJ/kg]", color=COLOR_TEXT)
-    ax.set_ylabel("Pressure  P [kPa]", color=COLOR_TEXT)
-    ax.set_title(
-        title or f"{res.refrigerant}  |  {res.stages}-stage  |  COP {res.cop:.2f}",
-        color=COLOR_TEXT,
+def _esc(text: str) -> str:
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
     )
-    ax.grid(True, which="both", color="#e5e4df", linewidth=0.8, zorder=0)
-    ax.tick_params(colors=COLOR_TEXT)
-    for spine in ax.spines.values():
-        spine.set_color("#d8d7d1")
-    ax.legend(frameon=False, labelcolor=COLOR_TEXT, loc="best")
-
-    # 사이클이 화면 가운데 오게 여유를 둔다
-    hmin, hmax = min(h), max(h)
-    margin = (hmax - hmin) * 0.35
-    ax.set_xlim(hmin - margin, hmax + margin)
-    pmin, pmax = min(p), max(p)
-    ax.set_ylim(pmin * 0.55, pmax * 1.9)
-
-    fig.tight_layout()
-    return fig
 
 
-def _label_offsets(res: CycleResult) -> list[tuple[float, float]]:
-    """상태점 번호가 서로 겹치지 않게 라벨 위치를 흩어 놓는다.
+def _nice_pressure_ticks(p_min: float, p_max: float) -> list[float]:
+    """로그 축에 찍을 눈금 값을 고른다 (1·2·5 × 10^n)."""
+    ticks: list[float] = []
+    exp = math.floor(math.log10(p_min))
+    while True:
+        base = 10.0**exp
+        for m in (1, 2, 5):
+            v = m * base
+            if p_min <= v <= p_max:
+                ticks.append(v)
+        if base > p_max:
+            break
+        exp += 1
+    return ticks
 
-    P-h 선도에서는 1-9 번(증발기 출구/압축기 흡입)이나 2-3 번(혼합 전후)처럼
-    거의 같은 자리에 오는 점들이 있어서, 가까운 점끼리는 위아래로 나눠 찍는다.
-    """
-    h_span = max(s.h for s in res.states) - min(s.h for s in res.states) or 1.0
-    import math as _math
 
-    p_span = _math.log10(
-        max(s.p for s in res.states) / min(s.p for s in res.states)
-    ) or 1.0
+def _nice_enthalpy_ticks(h_min: float, h_max: float, target: int = 6) -> list[float]:
+    """가로축 눈금을 보기 좋은 간격으로 고른다."""
+    span = h_max - h_min
+    if span <= 0:
+        return [h_min]
+    raw = span / target
+    exp = math.floor(math.log10(raw))
+    for m in (1, 2, 2.5, 5, 10):
+        step = m * 10.0**exp
+        if step >= raw:
+            break
+    start = math.ceil(h_min / step) * step
+    ticks = []
+    v = start
+    while v <= h_max:
+        ticks.append(v)
+        v += step
+    return ticks
 
+
+def _label_offsets(res: CycleResult, box: _Box) -> list[tuple[float, float]]:
+    """상태점 번호가 겹치지 않게 흩어 놓는다."""
     offsets: list[tuple[float, float]] = []
-    placed: list[tuple[float, float]] = []   # 정규화 좌표
+    placed: list[tuple[float, float]] = []
     for s in res.states:
-        x = s.h / h_span
-        y = _math.log10(s.p) / p_span
-        crowded = sum(
-            1
-            for px, py in placed
-            if abs(px - x) < 0.02 and abs(py - y) < 0.02
-        )
-        # 붐비는 자리면 위/아래/오른쪽으로 번갈아 밀어낸다
-        offsets.append([(8, 6), (8, -14), (-16, 6), (-16, -14)][crowded % 4])
-        placed.append((x, y))
+        px, py = box.x(s.h), box.y(s.p)
+        crowded = sum(1 for qx, qy in placed if abs(qx - px) < 14 and abs(qy - py) < 14)
+        offsets.append([(9, -7), (9, 15), (-15, -7), (-15, 15)][crowded % 4])
+        placed.append((px, py))
     return offsets
 
 
-def _compression_segments(res: CycleResult) -> Sequence[tuple[int, int]]:
-    """각 단의 압축 구간 상태점 번호."""
-    if res.stages == 1:
-        return ((1, 2),)
-    return ((1, 2), (3, 4))
+def ph_diagram_svg(
+    res: CycleResult,
+    width: float = 720,
+    height: float = 520,
+    dark: bool = False,
+) -> str:
+    """사이클을 P-h 선도 SVG 문자열로 만든다."""
+    c = COLORS_DARK if dark else COLORS_LIGHT
+    fluid = res.refrigerant
+
+    # --- 포화선 ---
+    dome_liq: list[tuple[float, float]] = []
+    dome_vap: list[tuple[float, float]] = []
+    t_top = props.t_crit(fluid) - 0.5
+    t_bot = max(-80.0, t_top - 160.0)
+    steps = 100
+    for i in range(steps + 1):
+        t = t_bot + (t_top - t_bot) * i / steps
+        try:
+            p = props.p_sat(fluid, t, q=1)
+            dome_liq.append((props.h_sat(fluid, t, 0), p))
+            dome_vap.append((props.h_sat(fluid, t, 1), p))
+        except Exception:
+            continue
+
+    cycle_pts = [(s.h, s.p) for s in res.states]
+    closed = cycle_pts + cycle_pts[:1]
+
+    # --- 표시 범위: 사이클이 가운데 오도록 여유를 준다 ---
+    hs = [h for h, _ in cycle_pts]
+    ps = [p for _, p in cycle_pts]
+    h_margin = (max(hs) - min(hs)) * 0.30
+    h_min, h_max = min(hs) - h_margin, max(hs) + h_margin
+    p_min, p_max = min(ps) * 0.5, max(ps) * 2.0
+
+    box = _Box(width, height, 74, 24, 46, 52, h_min, h_max,
+               math.log10(p_min), math.log10(p_max))
+
+    out: list[str] = []
+    add = out.append
+    add(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" '
+        f'width="100%" role="img" aria-label="P-h 선도" '
+        f'style="max-width:{width:.0f}px;font-family:system-ui,sans-serif">'
+    )
+    add(f'<rect width="{width}" height="{height}" fill="{c["surface"]}"/>')
+
+    # 그래프 영역 밖으로 선이 삐져나오지 않게 잘라낸다
+    plot_w = width - box.pad_left - box.pad_right
+    plot_h = height - box.pad_top - box.pad_bottom
+    add(
+        f'<clipPath id="plot"><rect x="{box.pad_left}" y="{box.pad_top}" '
+        f'width="{plot_w}" height="{plot_h}"/></clipPath>'
+    )
+
+    # --- 격자와 눈금 ---
+    for p in _nice_pressure_ticks(p_min, p_max):
+        y = box.y(p)
+        add(f'<line x1="{box.pad_left}" y1="{y:.1f}" x2="{width - box.pad_right}" '
+            f'y2="{y:.1f}" stroke="{c["grid"]}" stroke-width="1"/>')
+        add(f'<text x="{box.pad_left - 8}" y="{y + 4:.1f}" text-anchor="end" '
+            f'font-size="11" fill="{c["text"]}">{p:,.0f}</text>')
+    for h in _nice_enthalpy_ticks(h_min, h_max):
+        x = box.x(h)
+        add(f'<line x1="{x:.1f}" y1="{box.pad_top}" x2="{x:.1f}" '
+            f'y2="{height - box.pad_bottom}" stroke="{c["grid"]}" stroke-width="1"/>')
+        add(f'<text x="{x:.1f}" y="{height - box.pad_bottom + 18:.1f}" '
+            f'text-anchor="middle" font-size="11" fill="{c["text"]}">{h:,.0f}</text>')
+
+    # --- 축 ---
+    add(f'<line x1="{box.pad_left}" y1="{box.pad_top}" x2="{box.pad_left}" '
+        f'y2="{height - box.pad_bottom}" stroke="{c["axis"]}" stroke-width="1"/>')
+    add(f'<line x1="{box.pad_left}" y1="{height - box.pad_bottom}" '
+        f'x2="{width - box.pad_right}" y2="{height - box.pad_bottom}" '
+        f'stroke="{c["axis"]}" stroke-width="1"/>')
+
+    add('<g clip-path="url(#plot)">')
+
+    # --- 포화선 ---
+    for pts in (dome_liq, dome_vap):
+        d = _path(pts, box, h_min, h_max, p_min, p_max)
+        if d:
+            add(f'<path d="{d}" fill="none" stroke="{c["dome"]}" stroke-width="2" '
+                f'stroke-linejoin="round"/>')
+
+    # --- 사이클 경로 ---
+    d = " ".join(
+        ("M" if i == 0 else "L") + f"{box.x(h):.1f},{box.y(p):.1f}"
+        for i, (h, p) in enumerate(closed)
+    )
+    add(f'<path d="{d}" fill="none" stroke="{c["cycle"]}" stroke-width="2" '
+        f'stroke-linejoin="round"/>')
+
+    # --- 압축 구간 강조 ---
+    segments = ((1, 2),) if res.stages == 1 else ((1, 2), (3, 4))
+    for a, b in segments:
+        sa, sb = res.state(a), res.state(b)
+        add(f'<line x1="{box.x(sa.h):.1f}" y1="{box.y(sa.p):.1f}" '
+            f'x2="{box.x(sb.h):.1f}" y2="{box.y(sb.p):.1f}" '
+            f'stroke="{c["compression"]}" stroke-width="3.5" stroke-linecap="round"/>')
+
+    add('</g>')
+
+    # --- 상태점 ---
+    for s, (dx, dy) in zip(res.states, _label_offsets(res, box)):
+        px, py = box.x(s.h), box.y(s.p)
+        add(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4.5" fill="{c["cycle"]}" '
+            f'stroke="{c["surface"]}" stroke-width="2"/>')
+        add(f'<title>{_esc(f"{s.no}. {s.name} — {s.t:.2f}°C, {s.p:.1f} kPa, {s.h:.2f} kJ/kg")}</title>')
+        add(f'<text x="{px + dx:.1f}" y="{py + dy:.1f}" font-size="12" '
+            f'font-weight="600" fill="{c["text_strong"]}">{s.no}</text>')
+
+    # --- 축 제목과 범례 ---
+    add(f'<text x="{width / 2:.0f}" y="{height - 8:.0f}" text-anchor="middle" '
+        f'font-size="12" fill="{c["text"]}">엔탈피 h [kJ/kg]</text>')
+    add(f'<text x="16" y="{height / 2:.0f}" text-anchor="middle" font-size="12" '
+        f'fill="{c["text"]}" transform="rotate(-90 16 {height / 2:.0f})">'
+        f'압력 P [kPa] (로그)</text>')
+    add(f'<text x="{box.pad_left}" y="24" font-size="13" font-weight="600" '
+        f'fill="{c["text_strong"]}">{_esc(fluid)} · {res.stages}단 · COP {res.cop:.2f}</text>')
+
+    lx, ly = width - box.pad_right - 150, box.pad_top + 14
+    for i, (color, name) in enumerate(
+        ((c["dome"], "포화선"), (c["cycle"], "사이클"), (c["compression"], "압축"))
+    ):
+        y = ly + i * 17
+        add(f'<line x1="{lx}" y1="{y}" x2="{lx + 22}" y2="{y}" stroke="{color}" '
+            f'stroke-width="3" stroke-linecap="round"/>')
+        add(f'<text x="{lx + 28}" y="{y + 4}" font-size="11" fill="{c["text"]}">'
+            f'{name}</text>')
+
+    add("</svg>")
+    return "".join(out)
 
 
-def save_ph_diagram(res: CycleResult, path: str, **kwargs) -> str:
-    """P-h 선도를 파일로 저장한다."""
-    fig = ph_diagram(res, **kwargs)
-    fig.savefig(path, dpi=150, facecolor=fig.get_facecolor())
-    return path
+def _path(
+    pts: list[tuple[float, float]],
+    box: _Box,
+    h_min: float,
+    h_max: float,
+    p_min: float,
+    p_max: float,
+) -> str:
+    """보이는 범위 안의 점들만 이어 경로를 만든다."""
+    d: list[str] = []
+    pen_down = False
+    for h, p in pts:
+        visible = (h_min - 200 <= h <= h_max + 200) and (p_min * 0.2 <= p <= p_max * 5)
+        if not visible:
+            pen_down = False
+            continue
+        cmd = "L" if pen_down else "M"
+        d.append(f"{cmd}{box.x(h):.1f},{box.y(p):.1f}")
+        pen_down = True
+    return " ".join(d)
 
 
 # ==========================================================================
-# app.py — streamlit 화면
+# webui.py
 # ==========================================================================
 
-import pandas as pd
-import streamlit as st
-
-
+import html as html_mod
+import socket
+import threading
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 REFRIGERANTS = [
@@ -1455,323 +1525,521 @@ REFRIGERANTS = [
 ]
 
 
+@dataclass
+class Field:
+    """입력 칸 하나의 정의."""
+
+    key: str
+    label: str
+    default: Any
+    kind: str = "number"          # number | select | check
+    step: str = "0.1"
+    choices: tuple = ()
+    group: str = ""
+    hint: str = ""
+
+
+FIELDS: tuple[Field, ...] = (
+    Field("stages", "압축 단수", 2, "select", choices=((2, "2단 압축"), (1, "1단 압축")),
+          group="기본 사양"),
+    Field("refrigerant", "냉매", "R1234ze(E)", "select",
+          choices=tuple((r, r) for r in REFRIGERANTS), group="기본 사양"),
+    Field("capacity_rt", "냉동능력 [RT]", 150.0, step="1", group="기본 사양"),
+
+    Field("chilled_water_in", "냉수 입구온도 [°C]", 12.0, group="증발기 (냉수)"),
+    Field("chilled_water_out", "냉수 출구온도 [°C]", 7.0, group="증발기 (냉수)"),
+    Field("evap_approach", "증발기 approach [K]", 1.0, group="증발기 (냉수)"),
+    Field("superheat", "과열도 [K]", 1.0, group="증발기 (냉수)"),
+
+    Field("cooling_medium_in", "냉각 공기/물 입구온도 [°C]", 35.0, step="0.5",
+          group="응축기"),
+    Field("cond_approach", "응축기 approach [K]", 15.0, step="0.5", group="응축기"),
+    Field("subcool", "과냉도 [K]", 3.0, group="응축기"),
+
+    Field("eta_is_stage1", "1단 단열효율", 0.80, step="0.01", group="압축기"),
+    Field("eta_is_stage2", "2단 단열효율", 0.80, step="0.01", group="압축기"),
+    Field("eta_wire_to_shaft", "wire-to-shaft 효율", 0.89, step="0.01", group="압축기"),
+    Field("dp_suction", "흡입관 압력손실 [kPa]", 3.0, step="0.5", group="압축기"),
+    Field("dp_discharge", "토출관 압력손실 [kPa]", 5.0, step="0.5", group="압축기"),
+
+    Field("t_subcond", "서브콘덴서 온도 [°C]", "", step="0.5", group="서브콘덴서",
+          hint="비워두면 중간압을 √(P1·P2) 로 자동"),
+    Field("subcond_mass_ratio", "중간단 유량비 x", "", step="0.01", group="서브콘덴서",
+          hint="비워두면 에너지 밸런스로 계산"),
+
+    Field("t_cond_max", "최대 응축온도 [°C]", 70.0, step="1", group="기타"),
+    Field("psi", "임펠러 압력계수 ψ", 0.60, step="0.01", group="기타"),
+    Field("specific_speed", "임펠러 비속도 Ns", 0.70, step="0.01", group="기타"),
+    Field("excel_compat", "엑셀 호환 모드", False, "check", group="기타",
+          hint="원본 엑셀과 똑같이 계산"),
+    Field("show_iplv", "IPLV 계산 (조금 느림)", False, "check", group="기타"),
+)
+
+FIELD_BY_KEY = {f.key: f for f in FIELDS}
+
+
 # ---------------------------------------------------------------------------
-# 입력 (왼쪽 사이드바)
+# 입력 해석
 # ---------------------------------------------------------------------------
 
-def read_inputs() -> tuple[CycleInput, int, dict]:
-    sb = st.sidebar
-    sb.title("입력 조건")
+def parse_query(query: dict[str, list[str]]) -> dict[str, Any]:
+    """주소창의 값들을 읽어 필드 값 사전으로 만든다."""
+    values: dict[str, Any] = {}
+    first_visit = not query
 
-    sb.subheader("기본 사양")
-    stages = sb.radio("압축 단수", (2, 1), format_func=lambda n: f"{n}단 압축")
-    refrigerant = sb.selectbox("냉매", REFRIGERANTS)
-    capacity = sb.number_input("냉동능력 [RT]", 10.0, 2000.0, 150.0, step=10.0)
+    for f in FIELDS:
+        raw = query.get(f.key, [None])[0]
 
-    sb.subheader("증발기 (냉수)")
-    cw_in = sb.number_input("냉수 입구온도 [°C]", 0.0, 30.0, 12.0, step=0.1)
-    cw_out = sb.number_input("냉수 출구온도 [°C]", -5.0, 25.0, 7.0, step=0.1)
-    evap_app = sb.number_input("증발기 approach [K]", 0.1, 10.0, 1.0, step=0.1)
-    superheat = sb.number_input("과열도 [K]", 0.0, 15.0, 1.0, step=0.1)
+        if f.kind == "check":
+            # 체크박스는 꺼져 있으면 아예 전송되지 않는다
+            values[f.key] = f.default if first_visit else (raw is not None)
+            continue
 
-    sb.subheader("응축기")
-    medium_in = sb.number_input("냉각 공기/물 입구온도 [°C]", 0.0, 55.0, 35.0, step=0.5)
-    cond_app = sb.number_input("응축기 approach [K]", 0.5, 25.0, 15.0, step=0.5)
-    subcool = sb.number_input("과냉도 [K]", 0.0, 15.0, 3.0, step=0.1)
+        if raw is None or raw == "":
+            values[f.key] = f.default if first_visit else ("" if f.default == "" else f.default)
+            if raw == "":
+                values[f.key] = ""
+            continue
 
-    sb.subheader("압축기")
-    eta1 = sb.slider("1단 단열효율", 0.40, 0.95, 0.80, step=0.01)
-    eta2 = sb.slider("2단 단열효율", 0.40, 0.95, 0.80, step=0.01) if stages == 2 else eta1
-    eta_wts = sb.slider("wire-to-shaft 효율", 0.70, 1.00, 0.89, step=0.01)
+        if f.kind == "select":
+            values[f.key] = int(raw) if f.key == "stages" else raw
+        else:
+            try:
+                values[f.key] = float(raw)
+            except ValueError:
+                values[f.key] = f.default
+    return values
 
-    dp_s = sb.number_input("흡입관 압력손실 [kPa]", 0.0, 50.0, 3.0, step=0.5)
-    dp_d = sb.number_input("토출관 압력손실 [kPa]", 0.0, 50.0, 5.0, step=0.5)
 
-    t_sub = None
-    x = None
-    if stages == 2:
-        sb.subheader("서브콘덴서 (이코노마이저)")
-        auto_p = sb.checkbox(
-            "중간압 자동 (√(P1·P2))", value=True,
-            help="끄면 서브콘덴서 온도를 직접 지정한다",
-        )
-        if not auto_p:
-            t_sub = sb.number_input("서브콘덴서 온도 [°C]", -10.0, 60.0, 32.0, step=0.5)
-        auto_x = sb.checkbox(
-            "중간단 유량비 자동 (에너지 밸런스)", value=True,
-            help="끄면 유량비를 직접 지정한다 (원본 엑셀 방식)",
-        )
-        if not auto_x:
-            x = sb.number_input("중간단 유량비 x", 0.0, 1.0, 0.20, step=0.01)
+def build_input(values: dict[str, Any]) -> tuple[CycleInput, int]:
+    """필드 값으로 CycleInput 을 만든다."""
 
-    sb.subheader("최대 운전조건")
-    t_cond_max = sb.number_input("최대 응축온도 [°C]", 40.0, 100.0, 70.0, step=1.0)
+    def num(key: str) -> float:
+        v = values.get(key, FIELD_BY_KEY[key].default)
+        return float(v) if v != "" else float(FIELD_BY_KEY[key].default)
 
-    sb.subheader("추가 계산")
-    opts = {
-        "hx": sb.checkbox("열교환기 2차측 (LMTD / UA)", value=True),
-        "impeller": sb.checkbox("임펠러 개략 치수", value=True),
-        "iplv": sb.checkbox("IPLV (부분부하 효율)", value=False),
-        "psi": sb.slider("임펠러 압력계수 ψ", 0.40, 0.75, 0.60, step=0.01),
-        "ns": sb.slider("임펠러 비속도 Ns", 0.40, 1.00, 0.70, step=0.01),
-        "medium": sb.selectbox("IPLV 기준", ("air", "water"),
-                               format_func=lambda m: "공랭" if m == "air" else "수냉"),
-    }
+    def opt(key: str) -> Optional[float]:
+        v = values.get(key, "")
+        return None if v == "" or v is None else float(v)
 
-    excel_compat = sb.checkbox(
-        "엑셀 호환 모드", value=False,
-        help="원본 엑셀과 똑같이 계산한다 (온도 혼합 + 응축열량을 1단 유량으로)",
-    )
-
+    compat = bool(values.get("excel_compat"))
     inp = CycleInput(
-        refrigerant=refrigerant,
-        capacity_rt=capacity,
-        chilled_water_in=cw_in,
-        chilled_water_out=cw_out,
-        evap_approach=evap_app,
-        superheat=superheat,
-        cooling_medium_in=medium_in,
-        cond_approach=cond_app,
-        subcool=subcool,
-        dp_suction=dp_s,
-        dp_discharge=dp_d,
-        eta_is_stage1=eta1,
-        eta_is_stage2=eta2,
-        eta_wire_to_shaft=eta_wts,
-        t_subcond=t_sub,
-        subcond_mass_ratio=x,
-        t_cond_max=t_cond_max,
-        eta_is_max=eta1,
+        refrigerant=str(values.get("refrigerant", "R1234ze(E)")),
+        capacity_rt=num("capacity_rt"),
+        chilled_water_in=num("chilled_water_in"),
+        chilled_water_out=num("chilled_water_out"),
+        evap_approach=num("evap_approach"),
+        superheat=num("superheat"),
+        cooling_medium_in=num("cooling_medium_in"),
+        cond_approach=num("cond_approach"),
+        subcool=num("subcool"),
+        dp_suction=num("dp_suction"),
+        dp_discharge=num("dp_discharge"),
+        eta_is_stage1=num("eta_is_stage1"),
+        eta_is_stage2=num("eta_is_stage2"),
+        eta_wire_to_shaft=num("eta_wire_to_shaft"),
+        t_subcond=opt("t_subcond"),
+        subcond_mass_ratio=opt("subcond_mass_ratio"),
+        t_cond_max=num("t_cond_max"),
+        eta_is_max=num("eta_is_stage1"),
         compat=ExcelCompat(
-            temperature_mixing=excel_compat,
-            condenser_duty_first_stage_flow=excel_compat,
+            temperature_mixing=compat, condenser_duty_first_stage_flow=compat
         ),
     )
-    return inp, stages, opts
+    return inp, int(values.get("stages", 2))
 
 
 # ---------------------------------------------------------------------------
-# 결과 표시
+# HTML 만들기
 # ---------------------------------------------------------------------------
 
-def show_summary(res) -> None:
-    c = st.columns(4)
-    c[0].metric("COP (입력전력 기준)", f"{res.cop_input:.3f}")
-    c[1].metric("소비전력", f"{res.input_power:.1f} kW")
-    c[2].metric("냉동톤당 전력", f"{res.kw_per_rt:.4f} kW/RT")
-    c[3].metric("총 압축비", f"{res.total_pressure_ratio:.3f}")
+def esc(text: Any) -> str:
+    return html_mod.escape(str(text), quote=True)
 
-    c = st.columns(4)
-    c[0].metric("증발온도", f"{res.inp.te:.2f} °C")
-    c[1].metric("응축온도", f"{res.inp.tc:.2f} °C")
-    c[2].metric("냉매 유량 (증발기)", f"{res.mass_flow_evap:.3f} kg/s")
-    c[3].metric("1단 흡입 체적유량", f"{res.volume_flow_m3h:.0f} m³/h")
+
+STYLE = """
+:root{
+  color-scheme: light dark;
+  --bg:#f6f6f4; --panel:#fcfcfb; --line:#e0dfd9;
+  --ink:#0b0b0b; --ink2:#52514e; --ink3:#86857e;
+  --accent:#2a78d6; --warn:#eb6834; --ok:#1baf7a;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#121211; --panel:#1a1a19; --line:#2f2f2c;
+         --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8b8a82; --accent:#3987e5; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font-family:'Malgun Gothic','Apple SD Gothic Neo',system-ui,sans-serif;
+     font-size:14px;line-height:1.55}
+.wrap{display:flex;gap:18px;align-items:flex-start;padding:18px;max-width:1500px;margin:0 auto}
+aside{flex:0 0 288px;position:sticky;top:18px}
+main{flex:1;min-width:0}
+h1{font-size:21px;margin:0 0 4px}
+.sub{color:var(--ink2);margin:0 0 16px;font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+      padding:16px;margin-bottom:16px}
+fieldset{border:0;padding:0;margin:0 0 14px}
+legend{font-weight:700;font-size:12px;color:var(--ink2);padding:0 0 6px;
+       text-transform:none;letter-spacing:.02em}
+label{display:block;margin-bottom:9px}
+label .t{display:block;font-size:12px;color:var(--ink2);margin-bottom:3px}
+label .hint{display:block;font-size:11px;color:var(--ink3);margin-top:2px}
+input[type=number],select{width:100%;padding:7px 9px;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px;
+  font-family:inherit}
+input[type=checkbox]{margin-right:6px;vertical-align:-1px}
+button{width:100%;padding:11px;border:0;border-radius:9px;background:var(--accent);
+  color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+button:hover{filter:brightness(1.07)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.metric .k{font-size:12px;color:var(--ink2)}
+.metric .v{font-size:25px;font-weight:700;letter-spacing:-.02em}
+.metric .u{font-size:14px;font-weight:600;color:var(--ink2);margin-left:3px}
+h2{font-size:15px;margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line);
+      font-variant-numeric:tabular-nums}
+th{color:var(--ink2);font-weight:600;font-size:12px;white-space:nowrap}
+td:nth-child(2),th:nth-child(2){text-align:left}
+tbody tr:last-child td{border-bottom:0}
+.msg{padding:12px 14px;border-radius:9px;margin-bottom:14px;font-size:13px}
+.msg.err{background:#fdecea;color:#8a1d18;border:1px solid #f5c2bd}
+.msg.warn{background:#fdf2e6;color:#7a3c12;border:1px solid #f3d3b0}
+@media (prefers-color-scheme: dark){
+  .msg.err{background:#3a1512;color:#ffb3ab;border-color:#5e241e}
+  .msg.warn{background:#38230f;color:#ffca92;border-color:#5b3a1a}
+}
+.note{color:var(--ink3);font-size:12px;margin-top:8px}
+@media (max-width:900px){
+  .wrap{flex-direction:column}
+  aside{position:static;flex:1 1 auto;width:100%}
+}
+"""
+
+
+def render_form(values: dict[str, Any]) -> str:
+    out = ['<form method="get" action="/">']
+    groups: list[str] = []
+    for f in FIELDS:
+        if f.group not in groups:
+            groups.append(f.group)
+
+    for group in groups:
+        out.append(f"<fieldset><legend>{esc(group)}</legend>")
+        for f in (x for x in FIELDS if x.group == group):
+            v = values.get(f.key, f.default)
+            hint = f'<span class="hint">{esc(f.hint)}</span>' if f.hint else ""
+            if f.kind == "check":
+                checked = " checked" if v else ""
+                out.append(
+                    f'<label><input type="checkbox" name="{f.key}" value="1"{checked}>'
+                    f'{esc(f.label)}{hint}</label>'
+                )
+            elif f.kind == "select":
+                opts = "".join(
+                    f'<option value="{esc(cv)}"'
+                    f'{" selected" if str(cv) == str(v) else ""}>{esc(cl)}</option>'
+                    for cv, cl in f.choices
+                )
+                out.append(
+                    f'<label><span class="t">{esc(f.label)}</span>'
+                    f'<select name="{f.key}">{opts}</select>{hint}</label>'
+                )
+            else:
+                out.append(
+                    f'<label><span class="t">{esc(f.label)}</span>'
+                    f'<input type="number" step="{f.step}" name="{f.key}" '
+                    f'value="{esc(v)}">{hint}</label>'
+                )
+        out.append("</fieldset>")
+
+    out.append("<button type=\"submit\">다시 계산</button></form>")
+    return "".join(out)
+
+
+def _metric(key: str, value: str, unit: str = "") -> str:
+    u = f'<span class="u">{esc(unit)}</span>' if unit else ""
+    return (
+        f'<div class="metric"><div class="k">{esc(key)}</div>'
+        f'<div class="v">{esc(value)}{u}</div></div>'
+    )
+
+
+def _table(headers: list[str], rows: list[list[str]]) -> str:
+    head = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{esc(c)}</td>" for c in r) + "</tr>" for r in rows
+    )
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def render_results(res: CycleResult, values: dict[str, Any]) -> str:
+    inp = res.inp
+    out: list[str] = []
+
+    out.append('<div class="card"><div class="metrics">')
+    out.append(_metric("COP (입력전력 기준)", f"{res.cop_input:.3f}"))
+    out.append(_metric("소비전력", f"{res.input_power:.1f}", " kW"))
+    out.append(_metric("냉동톤당 전력", f"{res.kw_per_rt:.4f}", " kW/RT"))
+    out.append(_metric("총 압축비", f"{res.total_pressure_ratio:.3f}"))
+    out.append(_metric("증발온도", f"{inp.te:.2f}", " °C"))
+    out.append(_metric("응축온도", f"{inp.tc:.2f}", " °C"))
+    out.append(_metric("냉매 유량", f"{res.mass_flow_evap:.3f}", " kg/s"))
+    out.append(_metric("1단 흡입 체적유량", f"{res.volume_flow_m3h:.0f}", " m³/h"))
+    out.append("</div>")
 
     err = res.energy_balance_error
     if abs(err) >= 0.5:
-        st.warning(
-            f"에너지 수지 오차 {err:+.2f} % — 이코노마이저 유량비를 손으로 지정했거나 "
-            "배관 손실이 큰 경우다. '중간단 유량비 자동'을 켜면 수지가 맞는다."
+        out.append(
+            f'<div class="msg warn" style="margin-top:14px">'
+            f"에너지 수지 오차 {err:+.2f} % — 이코노마이저 유량비를 직접 넣었거나 "
+            f"배관 손실이 큽니다. '중간단 유량비 x' 를 비워두면 수지가 맞습니다.</div>"
+        )
+    out.append("</div>")
+
+    # P-h 선도
+    out.append('<div class="card"><h2>P-h 선도</h2>')
+    out.append(ph_diagram_svg(res, width=760, height=520))
+    out.append(
+        '<p class="note">점 위에 마우스를 올리면 상태점 값이 보입니다. '
+        "주황색이 압축 구간입니다.</p></div>"
+    )
+
+    # 상태점
+    out.append('<div class="card"><h2>상태점</h2>')
+    out.append(_table(
+        ["No", "위치", "온도 [°C]", "압력 [kPa]", "엔탈피 [kJ/kg]", "밀도 [kg/m³]"],
+        [
+            [
+                s.no, s.name, f"{s.t:.2f}", f"{s.p:.2f}", f"{s.h:.2f}",
+                f"{s.d:.2f}" if s.d is not None else "-",
+            ]
+            for s in res.states
+        ],
+    ))
+    out.append("</div>")
+
+    # 압축기
+    out.append('<div class="card"><h2>압축기</h2>')
+    out.append(_table(
+        ["단", "압축비", "흡입 [°C]", "토출 [°C]", "단열헤드 [kJ/kg]",
+         "유량 [kg/s]", "흡입체적 [m³/h]", "축동력 [kW]"],
+        [
+            [
+                st.name, f"{st.pressure_ratio:.3f}", f"{st.t_in:.2f}",
+                f"{st.t_out:.2f}", f"{st.dh_isentropic:.3f}",
+                f"{st.mass_flow:.4f}", f"{st.volume_flow_m3h:.1f}",
+                f"{st.power:.2f}",
+            ]
+            for st in res.stage_results
+        ],
+    ))
+    mc = res.max_condition
+    if mc is not None:
+        out.append(
+            f'<p class="note">최대 조건 (응축 {mc.t_cond:.0f}°C): '
+            f"토출온도 {mc.t_discharge:.1f}°C, 압축비 {mc.pressure_ratio:.2f}, "
+            f"입력전력 {mc.input_power:.1f} kW</p>"
+        )
+    out.append("</div>")
+
+    # 열교환기
+    hx = [
+        evaporator_side(res.qe, inp.te, inp.chilled_water_in),
+        condenser_side(res.qc, inp.tc, inp.cooling_medium_in),
+    ]
+    out.append('<div class="card"><h2>열교환기 2차측</h2>')
+    out.append(_table(
+        ["열교환기", "열량 [kW]", "입구 [°C]", "출구 [°C]", "유량 [m³/h]",
+         "LMTD [K]", "UA [kW/K]"],
+        [
+            [
+                x.name, f"{x.duty:.1f}", f"{x.t_in:.2f}", f"{x.t_out:.2f}",
+                f"{x.volume_flow_m3h:.1f}", f"{x.lmtd:.3f}", f"{x.ua:.2f}",
+            ]
+            for x in hx
+        ],
+    ))
+    out.append("</div>")
+
+    # 임펠러
+    psi = float(values.get("psi") or 0.60)
+    ns = float(values.get("specific_speed") or 0.70)
+    sizings = [
+        size_impeller(st, inp.refrigerant, head_coefficient=psi, specific_speed=ns)
+        for st in res.stage_results
+    ]
+    out.append('<div class="card"><h2>임펠러 개략 치수</h2>')
+    out.append(_table(
+        ["단", "회전수 [rpm]", "외경 [mm]", "주속 [m/s]", "마하수",
+         "흡입구 [mm]", "일계수 λ", "유량계수 φ"],
+        [
+            [
+                z.stage_name, f"{z.rpm:,.0f}", f"{z.diameter_mm:.1f}",
+                f"{z.tip_speed:.1f}", f"{z.tip_mach:.3f}",
+                f"{z.eye_diameter_mm:.1f}", f"{z.work_coefficient:.3f}",
+                f"{z.flow_coefficient:.4f}",
+            ]
+            for z in sizings
+        ],
+    ))
+    for z in sizings:
+        for w in z.warnings:
+            out.append(f'<div class="msg warn">{esc(z.stage_name)}: {esc(w)}</div>')
+    out.append(
+        '<p class="note">무차원수로 잡은 1차 근사입니다. '
+        "실제 설계는 깃 형상·확산기·CFD 로 다시 확인해야 합니다.</p></div>"
+    )
+
+    # IPLV
+    if values.get("show_iplv"):
+        out.append('<div class="card"><h2>IPLV (부분부하 효율)</h2>')
+        try:
+            r = iplv(inp, stages=res.stages, medium="air")
+        except (ValueError, RuntimeError) as exc:
+            out.append(f'<div class="msg err">IPLV 계산 실패: {esc(exc)}</div>')
+        else:
+            out.append(_table(
+                ["부하 [%]", "냉각 입구 [°C]", "응축온도 [°C]", "능력 [kW]",
+                 "입력전력 [kW]", "COP", "kW/RT"],
+                [
+                    [
+                        f"{p.load * 100:.0f}", f"{p.condition.medium_in:.1f}",
+                        f"{p.condition.t_cond:.1f}", f"{p.result.qe:.1f}",
+                        f"{p.result.input_power:.2f}", f"{p.cop:.3f}",
+                        f"{p.kw_per_rt:.4f}",
+                    ]
+                    for p in r.points
+                ],
+            ))
+            out.append(
+                f'<p class="note">IPLV: COP {r.iplv_cop:.3f} / '
+                f"{r.iplv_kw_per_rt:.4f} kW/RT — 부분부하 단열효율은 가정값입니다.</p>"
+            )
+        out.append("</div>")
+
+    return "".join(out)
+
+
+def render_page(query: dict[str, list[str]]) -> str:
+    values = parse_query(query)
+    try:
+        inp, stages = build_input(values)
+        res = solve(inp, stages=stages)
+        body = render_results(res, values)
+    except (ValueError, RuntimeError) as exc:
+        body = (
+            f'<div class="msg err"><b>계산할 수 없는 조건입니다.</b><br>{esc(exc)}</div>'
         )
 
-
-def states_table(res) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "No": s.no,
-                "위치": s.name,
-                "온도 [°C]": round(s.t, 2),
-                "압력 [kPa]": round(s.p, 2),
-                "엔탈피 [kJ/kg]": round(s.h, 2),
-                "밀도 [kg/m³]": round(s.d, 2) if s.d is not None else None,
-                "엔트로피 [kJ/kg·K]": round(s.s, 4) if s.s is not None else None,
-            }
-            for s in res.states
-        ]
-    )
-
-
-def stages_table(res) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "단": stage.name,
-                "흡입압력 [kPa]": round(stage.p_in, 2),
-                "토출압력 [kPa]": round(stage.p_out, 2),
-                "압축비": round(stage.pressure_ratio, 3),
-                "흡입온도 [°C]": round(stage.t_in, 2),
-                "토출온도 [°C]": round(stage.t_out, 2),
-                "단열헤드 [kJ/kg]": round(stage.dh_isentropic, 3),
-                "실제헤드 [kJ/kg]": round(stage.dh_actual, 3),
-                "유량 [kg/s]": round(stage.mass_flow, 4),
-                "흡입체적 [m³/h]": round(stage.volume_flow_m3h, 1),
-                "축동력 [kW]": round(stage.power, 2),
-            }
-            for stage in res.stage_results
-        ]
-    )
+    return f"""<!doctype html>
+<html lang="ko"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>터보 냉동기 사이클 해석</title>
+<style>{STYLE}</style>
+</head><body>
+<div class="wrap">
+  <aside><div class="card">{render_form(values)}</div></aside>
+  <main>
+    <h1>터보 냉동기 사이클 해석</h1>
+    <p class="sub">왼쪽 값을 고치고 '다시 계산'을 누르세요.
+      끝내려면 검은 창에서 Ctrl+C 를 누릅니다.</p>
+    {body}
+  </main>
+</div>
+</body></html>"""
 
 
-def main() -> None:
-    st.set_page_config(
-        page_title="터보 냉동기 사이클 해석", page_icon="❄", layout="wide"
-    )
-    st.title("❄ 터보 냉동기 사이클 해석")
-    st.caption(
-        "원본 엑셀(150RT_Cycle_Analysis)의 계산을 그대로 옮기고, "
-        "이코노마이저 에너지 밸런스와 임펠러 개략 설계를 더했다."
-    )
+# ---------------------------------------------------------------------------
+# 서버
+# ---------------------------------------------------------------------------
 
-    inp, stages, opts = read_inputs()
+class _Handler(BaseHTTPRequestHandler):
+    server_version = "turbochiller"
+
+    def do_GET(self) -> None:  # noqa: N802  (내장 클래스가 정한 이름)
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        try:
+            page = render_page(query)
+        except Exception as exc:  # 어떤 오류든 화면에 보여준다
+            page = (
+                "<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif'>"
+                f"<h2>오류가 났습니다</h2><pre>{html_mod.escape(repr(exc))}</pre></body>"
+            )
+        data = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *args) -> None:
+        """요청 로그는 찍지 않는다 (검은 창을 깨끗하게)."""
+
+
+def _free_port(preferred: int = 8765) -> int:
+    """쓸 수 있는 포트를 고른다."""
+    for port in range(preferred, preferred + 20):
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def serve(port: Optional[int] = None, open_browser: bool = True) -> None:
+    """웹 화면을 띄운다. Ctrl+C 로 끝낸다."""
+    port = port or _free_port()
+    url = f"http://127.0.0.1:{port}/"
+    server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+
+    print("=" * 46)
+    print("  터보 냉동기 사이클 해석")
+    print("=" * 46)
+    print()
+    print(f"  브라우저에서 열렸습니다: {url}")
+    print("  (자동으로 안 열리면 위 주소를 직접 입력하세요)")
+    print()
+    print("  끝내려면 이 창에서 Ctrl+C 를 누르세요.")
+    print()
+
+    if open_browser:
+        threading.Timer(0.7, lambda: webbrowser.open(url)).start()
 
     try:
-        res = solve(inp, stages=stages)
-    except (ValueError, RuntimeError) as exc:
-        st.error(f"계산할 수 없는 조건이다.\n\n{exc}")
-        st.stop()
-
-    show_summary(res)
-
-    tabs = st.tabs(["P-h 선도", "상태점", "압축기", "열교환기", "임펠러", "IPLV"])
-
-    with tabs[0]:
-        st.pyplot(ph_diagram(res, figsize=(9, 6.5)))
-        st.caption(
-            "가로축 엔탈피, 세로축 압력(로그). 회색은 포화선, 주황색이 압축 구간이다."
-        )
-
-    with tabs[1]:
-        st.dataframe(states_table(res), width="stretch", hide_index=True)
-        buf = io.StringIO()
-        states_table(res).to_csv(buf, index=False)
-        st.download_button(
-            "상태점 CSV 내려받기", buf.getvalue(),
-            file_name="상태점.csv", mime="text/csv",
-        )
-
-    with tabs[2]:
-        st.dataframe(stages_table(res), width="stretch", hide_index=True)
-        mc = res.max_condition
-        if mc is not None:
-            st.subheader(f"최대 조건 (응축 {mc.t_cond:.0f}°C)")
-            c = st.columns(4)
-            c[0].metric("최대 응축압력", f"{mc.p_cond:.0f} kPa")
-            c[1].metric("최대 토출온도", f"{mc.t_discharge:.1f} °C")
-            c[2].metric("최대 압축비", f"{mc.pressure_ratio:.2f}")
-            c[3].metric("최대 입력전력", f"{mc.input_power:.1f} kW")
-
-    with tabs[3]:
-        if not opts["hx"]:
-            st.info("왼쪽에서 '열교환기 2차측'을 켜면 계산한다.")
-        else:
-            rows = []
-            for hx in (
-                evaporator_side(res.qe, inp.te, inp.chilled_water_in),
-                condenser_side(res.qc, inp.tc, inp.cooling_medium_in),
-            ):
-                rows.append(
-                    {
-                        "열교환기": hx.name,
-                        "열량 [kW]": round(hx.duty, 1),
-                        "2차측 입구 [°C]": round(hx.t_in, 2),
-                        "2차측 출구 [°C]": round(hx.t_out, 2),
-                        "유량 [m³/h]": round(hx.volume_flow_m3h, 1),
-                        "온도차 입구 [K]": round(hx.td_in, 2),
-                        "온도차 출구 [K]": round(hx.td_out, 2),
-                        "LMTD [K]": round(hx.lmtd, 3),
-                        "UA [kW/K]": round(hx.ua, 2),
-                    }
-                )
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-
-    with tabs[4]:
-        if not opts["impeller"]:
-            st.info("왼쪽에서 '임펠러 개략 치수'를 켜면 계산한다.")
-        else:
-            st.caption(
-                "무차원수로 잡은 1차 근사다. 깃 형상·확산기·CFD 로 다시 확인해야 한다."
-            )
-            rows = []
-            warns: list[str] = []
-            for stage in res.stage_results:
-                sz = size_impeller(
-                    stage, inp.refrigerant,
-                    head_coefficient=opts["psi"], specific_speed=opts["ns"],
-                )
-                rows.append(
-                    {
-                        "단": sz.stage_name,
-                        "회전수 [rpm]": round(sz.rpm),
-                        "임펠러 외경 [mm]": round(sz.diameter_mm, 1),
-                        "선단 주속 [m/s]": round(sz.tip_speed, 1),
-                        "선단 마하수": round(sz.tip_mach, 3),
-                        "흡입구 외경 [mm]": round(sz.eye_diameter_mm, 1),
-                        "일계수 λ": round(sz.work_coefficient, 3),
-                        "유량계수 φ": round(sz.flow_coefficient, 4),
-                        "비직경 Ds": round(sz.specific_diameter, 3),
-                    }
-                )
-                warns += [f"{sz.stage_name}: {w}" for w in sz.warnings]
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-            for w in warns:
-                st.warning(w)
-
-    with tabs[5]:
-        if not opts["iplv"]:
-            st.info("왼쪽에서 'IPLV'를 켜면 계산한다. (부하점 4개를 다시 풀어서 조금 걸린다)")
-        else:
-            try:
-                r = iplv(inp, stages=stages, medium=opts["medium"])
-            except (ValueError, RuntimeError) as exc:
-                st.error(f"IPLV 계산 실패: {exc}")
-            else:
-                st.dataframe(
-                    pd.DataFrame(
-                        [
-                            {
-                                "부하 [%]": round(p.load * 100),
-                                "냉각 입구 [°C]": p.condition.medium_in,
-                                "응축온도 [°C]": p.condition.t_cond,
-                                "능력 [kW]": round(p.result.qe, 1),
-                                "입력전력 [kW]": round(p.result.input_power, 2),
-                                "COP": round(p.cop, 3),
-                                "kW/RT": round(p.kw_per_rt, 4),
-                            }
-                            for p in r.points
-                        ]
-                    ),
-                    width="stretch",
-                    hide_index=True,
-                )
-                c = st.columns(2)
-                c[0].metric("IPLV (COP 기준)", f"{r.iplv_cop:.3f}")
-                c[1].metric("IPLV (kW/RT 기준)", f"{r.iplv_kw_per_rt:.4f}")
-                st.caption(
-                    "부분부하 단열효율은 가정값이다 (standards.default_part_load_efficiency). "
-                    "실측 성능곡선이 있으면 그 함수를 바꿔 쓰면 된다."
-                )
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n종료합니다.")
+    finally:
+        server.server_close()
 
 
 # ==========================================================================
 # 실행 진입점
 # ==========================================================================
 
-def _streamlit_is_running() -> bool:
-    """`streamlit run` 으로 실행됐는지 확인한다."""
-    try:
-        from streamlit.runtime import exists
-
-        return exists()
-    except Exception:
-        return False
-
-
-def _print_default_report() -> None:
-    """화면 없이 그냥 실행했을 때 기본 조건으로 한 번 계산해 보여준다."""
+def _main() -> None:
     parser = argparse.ArgumentParser(
         description="터보 냉동기 사이클 해석 (파일 하나 배포판)"
     )
+    parser.add_argument(
+        "--text", action="store_true",
+        help="화면 대신 계산 결과를 글자로만 찍는다",
+    )
+    parser.add_argument("--port", type=int, help="웹 화면 포트 (기본: 8765부터 빈 곳)")
+    parser.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않는다")
     parser.add_argument("--refrigerant", default="R1234ze(E)", help="냉매")
     parser.add_argument("--capacity", type=float, default=150.0, help="냉동능력 [RT]")
     parser.add_argument("--stages", type=int, choices=(1, 2), default=2, help="압축 단수")
@@ -1779,20 +2047,19 @@ def _print_default_report() -> None:
     parser.add_argument("--t-cond", type=float, help="응축온도 [°C]")
     args = parser.parse_args()
 
-    inp = CycleInput(
-        refrigerant=args.refrigerant,
-        capacity_rt=args.capacity,
-        t_evap=args.t_evap,
-        t_cond=args.t_cond,
-    )
-    print(format_report(solve(inp, stages=args.stages)))
-    print()
-    print("화면으로 보시려면:  streamlit run 터보냉동기_사이클해석.py")
+    if args.text:
+        inp = CycleInput(
+            refrigerant=args.refrigerant,
+            capacity_rt=args.capacity,
+            t_evap=args.t_evap,
+            t_cond=args.t_cond,
+        )
+        print(format_report(solve(inp, stages=args.stages)))
+        return
+
+    serve(port=args.port, open_browser=not args.no_browser)
 
 
 if __name__ == "__main__":
-    if _streamlit_is_running():
-        main()
-    else:
-        _print_default_report()
+    _main()
 

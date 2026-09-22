@@ -24,18 +24,33 @@
 | `dist/터보냉동기_사이클해석.py` | 프로그램 전체가 들어 있는 파일 하나 |
 | `dist/실행_윈도우.bat` (맥은 `dist/실행_맥.command`) | 두 번 클릭해서 실행 |
 
-두 파일을 같은 폴더(예: 바탕화면에 새 폴더)에 넣고 실행 파일을 두 번 클릭하면
-필요한 라이브러리를 알아서 깔고 브라우저까지 열어준다.
+**설치되는 것은 `CoolProp` 하나뿐이다.**
+화면은 파이썬에 처음부터 들어 있는 기능(`http.server`)으로 만들었다.
+
+> **왜 streamlit 을 안 쓰나**
+> streamlit 은 `pandas` → `pyarrow` 를 끌고 오는데, **pyarrow 는 64비트 윈도우용
+> 설치 파일밖에 없다.** 32비트나 ARM 윈도우에서는 소스 컴파일을 시도하다 실패한다.
+> 반면 `CoolProp` 은 win32 · win_amd64 · win_arm64 wheel 이 모두 있어서 어디서나 깔린다.
+> 그래서 배포판은 무거운 라이브러리를 전부 걷어냈다.
+> (`tests/test_webui.py` 가 배포판에 그 라이브러리들이 안 섞였는지 검사한다)
+
+명령줄에서 직접 쓸 수도 있다.
+
+```bash
+python 터보냉동기_사이클해석.py              # 웹 화면 (브라우저 자동 실행)
+python 터보냉동기_사이클해석.py --text        # 계산 결과만 글자로
+python 터보냉동기_사이클해석.py --help
+```
 
 > 이 단일 파일은 `tools/build_single_file.py` 가 아래 패키지를 합쳐서 만든 것이다.
-> 코드를 고칠 때는 `turbochiller/` 를 고치고 `python tools/build_single_file.py` 로 다시 만들면 된다.
+> 코드를 고칠 때는 `turbochiller/` 를 고치고 `python tools/build_single_file.py` 로 다시 만든다.
 
 ---
 
-## 0-1. 전체 폴더를 받았을 때 — 두 번 클릭
+## 0-1. 전체 폴더를 받았을 때
 
-파이썬만 깔려 있으면 아래 파일을 **두 번 클릭**하면 끝이다.
-필요한 라이브러리를 알아서 깔고 브라우저까지 열어준다 (처음 한 번만 몇 분 걸린다).
+전체 폴더에는 streamlit 화면(`app.py`)도 같이 들어 있다.
+streamlit 이 깔리는 PC 라면 이쪽이 조금 더 매끄럽다.
 
 | 운영체제 | 실행할 파일 |
 |----------|-------------|
@@ -48,7 +63,11 @@
 > 검은 창이 같이 뜨는데, **프로그램이 도는 창이라 닫으면 안 된다.**
 > 끝낼 때는 그 창에서 `Ctrl+C`(맥은 `Control+C`)를 누른다.
 
-아래는 직접 명령어를 쳐서 쓰는 방법이다.
+streamlit 설치가 안 되는 PC 라면 내장 화면을 쓰면 된다.
+
+```bash
+python -m turbochiller.webui
+```
 
 ---
 
@@ -207,7 +226,9 @@ pytest
 
 - `tests/test_excel_reference.py` — 엑셀 3개 시트의 값과 대조
 - `tests/test_cycle.py` — 에너지 보존, 입력 검증, 임펠러 관계식
-- `tests/test_app.py` — 웹 화면이 예외 없이 뜨는지
+- `tests/test_app.py` — streamlit 화면이 예외 없이 뜨는지
+- `tests/test_webui.py` — 내장 화면·SVG, 그리고 배포판에 무거운 라이브러리가
+  섞이지 않았는지
 
 ---
 
@@ -220,11 +241,15 @@ turbochiller/
   hx.py          열교환기 2차측 LMTD / UA
   impeller.py    임펠러 개략 치수
   standards.py   AHRI 550/590 조건표, IPLV
-  plot.py        P-h 선도
+  svg.py         P-h 선도 (내장 기능만, 라이브러리 불필요)
+  plot.py        P-h 선도 (matplotlib 판)
+  webui.py       웹 화면 (내장 기능만)   ← 배포판이 쓰는 화면
   report.py      결과 출력 서식
   config.py      입력 파일 읽기/쓰기
   cli.py         명령줄 실행기
-app.py           웹 화면 (streamlit)
+app.py           웹 화면 (streamlit 판)
+tools/           배포용 단일 파일 빌드
+dist/            배포판 (파일 2개)
 examples/        입력 파일 예시 3개 (엑셀 시트 3개에 대응)
 tests/           검증 테스트
 docs/            모델 설명

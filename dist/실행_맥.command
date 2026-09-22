@@ -21,7 +21,6 @@ if [ ! -f "$APP" ]; then
     echo "[오류] $APP 파일을 찾을 수 없습니다."
     echo
     echo "  지금 위치: $(pwd)"
-    echo
     echo "  이 파일과 $APP 이 같은 폴더에 있어야 합니다."
     pause_and_exit 1
 fi
@@ -37,22 +36,20 @@ fi
 echo "사용할 파이썬: $($PY --version)"
 echo
 
-if [ ! -f ".installed" ]; then
-    echo "필요한 라이브러리를 설치합니다. 처음 한 번만 몇 분 걸립니다..."
+if ! $PY -c "import CoolProp" > /dev/null 2>&1; then
+    echo "냉매 물성 라이브러리(CoolProp)를 설치합니다. 처음 한 번만 몇 분 걸립니다..."
     echo
     $PY -m pip install --upgrade pip
-    if ! $PY -m pip install CoolProp streamlit pandas matplotlib; then
+    if ! $PY -m pip install CoolProp; then
         echo
-        echo "[오류] 라이브러리 설치에 실패했습니다."
-        echo "  - 인터넷 연결을 확인해 주세요."
-        echo "  - 회사 네트워크라면 방화벽/프록시 때문일 수 있습니다."
+        echo "[오류] CoolProp 설치에 실패했습니다."
+        echo "  위에 나온 오류 내용을 그대로 알려주시면 도와드리겠습니다."
         pause_and_exit 1
     fi
-    echo "설치 완료" > .installed
     echo
 fi
 
 echo "브라우저가 열립니다. 이 창은 닫지 마세요."
 echo "프로그램을 끝내려면 이 창에서 Control+C 를 누르세요."
 echo
-$PY -m streamlit run "$APP"
+$PY "$APP"
