@@ -1,0 +1,13 @@
+# 계산에 꼭 필요한 것
+CoolProp>=6.4          # 냉매 물성 (엑셀의 REFPROP/CoolProp 애드인 대체)
+
+# 입력 파일(.yaml)을 쓸 때
+PyYAML>=6.0
+
+# 웹 화면(app.py)과 P-h 선도를 쓸 때
+streamlit>=1.30
+pandas>=2.0
+matplotlib>=3.7
+
+# 테스트를 돌릴 때
+pytest>=7.0

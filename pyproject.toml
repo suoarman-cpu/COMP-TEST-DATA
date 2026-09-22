@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turbochiller"
+version = "0.1.0"
+description = "터보 냉동기 사이클 해석 및 터보 압축기 개략 설계"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["CoolProp>=6.4"]
+
+[project.optional-dependencies]
+config = ["PyYAML>=6.0"]
+gui = ["streamlit>=1.30", "pandas>=2.0", "matplotlib>=3.7"]
+dev = ["pytest>=7.0", "PyYAML>=6.0", "streamlit>=1.30", "pandas>=2.0", "matplotlib>=3.7"]
+
+[project.scripts]
+turbochiller = "turbochiller.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["turbochiller*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::UserWarning"]
