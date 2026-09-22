@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Iterable, Literal, Optional
 
 from CoolProp.CoolProp import PropsSI
 
@@ -182,6 +183,36 @@ def molar_mass(fluid: str) -> float:
     from CoolProp.CoolProp import PropsSI as _P
 
     return _P("M", "", 0, "", 0, normalize(fluid)) * 1000.0
+
+
+def h_dp(fluid: str, density: float, p_kpa: float) -> float:
+    """엔탈피 [kJ/kg] (밀도, P 기준). 등비체적선을 그릴 때 쓴다."""
+    return _props("H", "D", density, "P", p_kpa * 1000.0, fluid) / 1000.0
+
+
+def t_dp(fluid: str, density: float, p_kpa: float) -> float:
+    """온도 [°C] (밀도, P 기준)."""
+    return _props("T", "D", density, "P", p_kpa * 1000.0, fluid) - T0
+
+
+def s_hp(fluid: str, h: float, p_kpa: float) -> float:
+    """엔트로피 [kJ/kg·K] (h, P 기준)."""
+    return _props("S", "H", h * 1000.0, "P", p_kpa * 1000.0, fluid) / 1000.0
+
+
+def q_sp(fluid: str, s: float, p_kpa: float) -> float:
+    """건도 [-] (s, P 기준). 2상 영역이 아니면 -1 또는 범위 밖 값이 나온다."""
+    return _props("Q", "S", s * 1000.0, "P", p_kpa * 1000.0, fluid)
+
+
+def q_dp(fluid: str, density: float, p_kpa: float) -> float:
+    """건도 [-] (밀도, P 기준)."""
+    return _props("Q", "D", density, "P", p_kpa * 1000.0, fluid)
+
+
+def in_two_phase(q: float) -> bool:
+    """CoolProp 이 돌려준 건도가 2상 영역을 뜻하는지."""
+    return 0.0 <= q <= 1.0
 
 
 # ==========================================================================
@@ -868,7 +899,8 @@ class ImpellerSizing:
     specific_speed: float       # Ns
     specific_diameter: float    # Ds
     flow_coefficient: float     # phi
-    tip_mach: float             # Mu2
+    tip_mach: float             # Mu2 (선단)
+    eye_mach: float             # 흡입구 축방향 마하수
     inlet_sound_speed: float    # [m/s]
     warnings: list[str]
 
@@ -881,58 +913,134 @@ class ImpellerSizing:
         return self.eye_diameter * 1000.0
 
 
+@dataclass
+class Given:
+    """미리 정해 놓고 들어가는 값들.
+
+    psi(압력계수) · rpm(회전수) · diameter(외경) 셋은 아래 관계로 묶여 있다.
+
+        u2 = sqrt(dh_is / psi)          헤드가 주속을 정한다
+        u2 = omega * D2 / 2             주속 = 각속도 x 반지름
+
+    그래서 셋 중 **둘을 정하면 나머지 하나는 따라 나온다.**
+    하나만 정하거나 아무것도 안 정하면 비속도(Ns)로 회전수를 잡는다.
+
+    흡입구 외경(eye_diameter)은 따로다. 정해 주면 흡입 축방향 마하수가
+    역산되고, 안 정하면 목표 마하수에서 외경이 나온다.
+    """
+
+    head_coefficient: Optional[float] = None    # psi [-]
+    rpm: Optional[float] = None                 # 축 회전수 [rpm]
+    diameter: Optional[float] = None            # 임펠러 외경 [m]
+    eye_diameter: Optional[float] = None        # 흡입구 외경 [m]
+
+    specific_speed: float = 0.70                # 아무것도 안 정했을 때 쓸 Ns
+    default_head_coefficient: float = 0.60      # psi 를 안 정했을 때
+    eye_hub_ratio: float = 0.35                 # 흡입구 허브/팁 비
+    inlet_axial_mach: float = 0.30              # 흡입구 축방향 마하수 목표
+
+    @property
+    def fixed_count(self) -> int:
+        return sum(
+            v is not None
+            for v in (self.head_coefficient, self.rpm, self.diameter)
+        )
+
+
 def size_impeller(
     stage: StageResult,
     refrigerant: str,
-    head_coefficient: float = 0.60,
-    specific_speed: float = 0.70,
-    rpm: Optional[float] = None,
-    eye_hub_ratio: float = 0.35,
-    inlet_axial_mach: float = 0.30,
+    given: Optional[Given] = None,
 ) -> ImpellerSizing:
-    """한 단의 임펠러 치수를 개략 산정한다.
+    """임펠러 한 단의 치수를 개략 산정한다.
 
-    stage             : cycle.compress() 가 돌려준 단 성능
-    head_coefficient  : psi. 후향깃 임펠러는 0.55~0.62 가 흔하다
-    specific_speed    : Ns. rpm 을 직접 주면 무시한다
-    rpm               : 회전수를 고정하고 싶을 때 [rpm]
-    eye_hub_ratio     : 흡입구 허브/팁 비 (보통 0.3~0.45)
-    inlet_axial_mach  : 흡입구 축방향 마하수 목표 (보통 0.25~0.35)
+    주의: 여러 단짜리 압축기는 이 함수를 단마다 따로 부르면 안 된다.
+    단일축 직결이면 모든 단의 회전수가 같아야 하는데, 단마다 부르면
+    단별 최적 비속도에 맞춘 '서로 다른 회전수' 가 나와 버린다.
+    그럴 때는 size_machine() 을 쓸 것.
     """
-    if head_coefficient <= 0:
-        raise ValueError("압력계수(psi)는 0보다 커야 한다")
+    g = given or Given()
+    warnings: list[str] = []
 
-    dh_is_j = stage.dh_isentropic * 1000.0      # [J/kg]
-    q = stage.mass_flow / stage.suction_density  # [m3/s]
+    dh_is_j = stage.dh_isentropic * 1000.0          # [J/kg]
+    q = stage.mass_flow / stage.suction_density      # [m3/s]
     if q <= 0:
         raise ValueError("흡입 체적유량이 0 이하다")
+    if dh_is_j <= 0:
+        raise ValueError("단열 헤드가 0 이하다")
 
-    # 주속은 헤드계수로 정해진다.  dh_is = psi * u2^2
-    u2 = math.sqrt(dh_is_j / head_coefficient)
+    psi, rpm, d2 = g.head_coefficient, g.rpm, g.diameter
 
-    # 회전수: 직접 주거나 비속도로 정한다.
-    if rpm is not None:
+    if g.fixed_count >= 3:
+        warnings.append(
+            "psi·회전수·외경을 셋 다 지정했다. 셋은 서로 묶여 있어서 "
+            "보통 둘만 정하면 된다. 여기서는 회전수와 외경을 쓰고 "
+            "psi 는 그 둘에서 역산했다"
+        )
+        psi = None
+
+    # --- psi / rpm / D2 를 서로 풀어낸다 -----------------------------------
+    if rpm is not None and d2 is not None:
+        # 회전수와 외경이 정해졌다 -> 낼 수 있는 주속이 정해지고, psi 가 따라 나온다
         omega = rpm * 2.0 * math.pi / 60.0
-        ns = omega * math.sqrt(q) / dh_is_j**0.75
+        u2 = omega * d2 / 2.0
+        psi = dh_is_j / u2**2
+        if psi > LIMITS["psi"][1]:
+            warnings.append(
+                f"이 회전수·외경으로는 psi 가 {psi:.3f} 나 필요하다. "
+                f"임펠러가 헤드를 못 낸다 (보통 {LIMITS['psi'][1]} 이하). "
+                "회전수를 올리거나 외경을 키울 것"
+            )
     else:
-        ns = specific_speed
-        omega = ns * dh_is_j**0.75 / math.sqrt(q)
-        rpm = omega * 60.0 / (2.0 * math.pi)
+        if psi is None:
+            psi = g.default_head_coefficient
+        if psi <= 0:
+            raise ValueError("압력계수(psi)는 0보다 커야 한다")
+        u2 = math.sqrt(dh_is_j / psi)
 
-    d2 = 2.0 * u2 / omega
+        if rpm is not None:
+            omega = rpm * 2.0 * math.pi / 60.0
+            d2 = 2.0 * u2 / omega
+        elif d2 is not None:
+            omega = 2.0 * u2 / d2
+            rpm = omega * 60.0 / (2.0 * math.pi)
+        else:
+            # 아무것도 안 정했다 -> 비속도로 회전수를 잡는다
+            omega = g.specific_speed * dh_is_j**0.75 / math.sqrt(q)
+            rpm = omega * 60.0 / (2.0 * math.pi)
+            d2 = 2.0 * u2 / omega
+
+    ns = omega * math.sqrt(q) / dh_is_j**0.75
     ds = d2 * dh_is_j**0.25 / math.sqrt(q)
     phi = q / (u2 * d2**2)
 
     a1 = props.a_tp(refrigerant, stage.t_in, stage.p_in)
     mu2 = u2 / a1
 
-    # 흡입구(아이) 외경: 축방향 속도를 마하수 목표로 잡고 환상 면적에서 역산
-    c_axial = inlet_axial_mach * a1
-    area = q / c_axial
-    d_eye = math.sqrt(4.0 * area / (math.pi * (1.0 - eye_hub_ratio**2)))
+    # --- 흡입구 ---
+    if g.eye_diameter is not None:
+        d_eye = g.eye_diameter
+        area = math.pi / 4.0 * d_eye**2 * (1.0 - g.eye_hub_ratio**2)
+        c_axial = q / area if area > 0 else float("inf")
+        eye_mach = c_axial / a1
+        if eye_mach > 0.45:
+            warnings.append(
+                f"흡입구 축방향 마하수가 {eye_mach:.2f} 다. 너무 빠르다 "
+                "(0.25~0.35 가 보통). 초킹으로 유량이 막힐 수 있으니 "
+                "흡입구를 키울 것"
+            )
+        elif eye_mach < 0.12:
+            warnings.append(
+                f"흡입구 축방향 마하수가 {eye_mach:.2f} 로 낮다. "
+                "흡입구가 필요 이상으로 크다"
+            )
+    else:
+        eye_mach = g.inlet_axial_mach
+        c_axial = eye_mach * a1
+        area = q / c_axial
+        d_eye = math.sqrt(4.0 * area / (math.pi * (1.0 - g.eye_hub_ratio**2)))
 
-    warnings: list[str] = []
-    _check(warnings, "압력계수 psi", head_coefficient, *LIMITS["psi"])
+    _check(warnings, "압력계수 psi", psi, *LIMITS["psi"])
     _check(warnings, "비속도 Ns", ns, *LIMITS["specific_speed"])
     _check(warnings, "유량계수 phi", phi, *LIMITS["flow_coefficient"])
     _check(warnings, "선단 마하수 Mu2", mu2, *LIMITS["tip_mach"])
@@ -952,7 +1060,8 @@ def size_impeller(
         tip_speed=u2,
         diameter=d2,
         eye_diameter=d_eye,
-        head_coefficient=head_coefficient,
+        eye_mach=eye_mach,
+        head_coefficient=psi,
         work_coefficient=stage.dh_actual * 1000.0 / u2**2,
         specific_speed=ns,
         specific_diameter=ds,
@@ -960,6 +1069,102 @@ def size_impeller(
         tip_mach=mu2,
         inlet_sound_speed=a1,
         warnings=warnings,
+    )
+
+
+@dataclass
+class MachineSizing:
+    """압축기 한 대(여러 단)의 개략 치수.
+
+    단일축 직결이면 모든 단이 같은 회전수로 돌아간다.
+    """
+
+    rpm: float
+    drive: str                      # "단일축 직결" 또는 "기어 내장형"
+    stages: list[ImpellerSizing]
+    warnings: list[str]
+
+    @property
+    def largest_diameter_mm(self) -> float:
+        return max(s.diameter_mm for s in self.stages)
+
+
+def size_machine(
+    result,
+    given: Optional[Given] = None,
+    stage_diameters: Optional[list[Optional[float]]] = None,
+    stage_eye_diameters: Optional[list[Optional[float]]] = None,
+    geared: bool = False,
+) -> MachineSizing:
+    """압축기 한 대(여러 단)를 통째로 개략 산정한다.
+
+    result              : cycle.solve() 가 돌려준 사이클 결과
+    given               : 미리 정해 둔 값 (회전수·psi·외경 등)
+    stage_diameters     : 단별 임펠러 외경 [m]. 주면 given.diameter 보다 우선한다
+    stage_eye_diameters : 단별 흡입구 외경 [m]
+    geared              : True 면 기어 내장형으로 보고 단마다 회전수를 따로 잡는다
+
+    터보 냉동기의 2단 압축기는 보통 임펠러 두 개가 한 축에 직결이라
+    회전수가 같다. 그래서 기본값은 단일축이다.
+    """
+    stages = result.stage_results
+    if not stages:
+        raise ValueError("압축기 단 정보가 없다")
+
+    g = given or Given()
+    fluid = result.refrigerant
+    warnings: list[str] = []
+
+    def per_stage(i: int, rpm: Optional[float]) -> Given:
+        d = None
+        if stage_diameters and i < len(stage_diameters):
+            d = stage_diameters[i]
+        if d is None and i == 0:
+            d = g.diameter
+        eye = None
+        if stage_eye_diameters and i < len(stage_eye_diameters):
+            eye = stage_eye_diameters[i]
+        if eye is None and i == 0:
+            eye = g.eye_diameter
+        return replace(g, rpm=rpm, diameter=d, eye_diameter=eye)
+
+    if geared:
+        sizings = [
+            size_impeller(st, fluid, per_stage(i, g.rpm))
+            for i, st in enumerate(stages)
+        ]
+        if len({round(s.rpm) for s in sizings}) > 1:
+            warnings.append(
+                "기어 내장형으로 계산했다. 단별 회전수가 다르므로 "
+                "실제로 증속기어가 단마다 따로 있는 구조여야 한다"
+            )
+        drive = "기어 내장형"
+    else:
+        # --- 단일축: 회전수를 하나로 정한다 ---
+        rpm = g.rpm
+        if rpm is None:
+            # 1단은 체적유량이 가장 커서 회전수를 지배한다. 여기에 맞춘다.
+            rpm = size_impeller(stages[0], fluid, per_stage(0, None)).rpm
+        sizings = [
+            size_impeller(st, fluid, per_stage(i, rpm))
+            for i, st in enumerate(stages)
+        ]
+        drive = "단일축 직결"
+
+        if len(sizings) > 1:
+            ns_min = min(s.specific_speed for s in sizings)
+            if ns_min < LIMITS["specific_speed"][0]:
+                warnings.append(
+                    f"축 회전수를 하나로 묶으니 뒷단 비속도가 {ns_min:.2f} 까지 "
+                    "떨어진다. 뒷단 효율이 낮아지므로, 회전수를 올리거나 "
+                    "뒷단 압력계수(psi)를 달리 잡는 것을 검토할 것"
+                )
+
+    for sz in sizings:
+        warnings.extend(f"{sz.stage_name}: {w}" for w in sz.warnings)
+
+    return MachineSizing(
+        rpm=sizings[0].rpm, drive=drive, stages=sizings, warnings=warnings
     )
 
 
@@ -1196,23 +1401,26 @@ def format_hx(results: list[HXResult]) -> str:
     return "\n".join(out)
 
 
-def format_impeller(sizings: list[ImpellerSizing]) -> str:
+def format_impeller(machine: MachineSizing) -> str:
     """임펠러 개략 설계 결과."""
     out = ["", "[ 임펠러 개략 설계 (1차 근사) ]"]
-    for s in sizings:
+    out.append(f"  구동 방식        : {machine.drive}")
+    out.append(f"  축 회전수        : {machine.rpm:10,.0f} rpm"
+               + ("   (모든 단 공통)" if machine.drive == "단일축 직결" else ""))
+    for s in machine.stages:
         out.append(f"  - {s.stage_name}")
-        out.append(f"      회전수 N         : {s.rpm:10.0f} rpm")
         out.append(f"      임펠러 외경 D2   : {s.diameter_mm:10.1f} mm")
         out.append(f"      선단 주속 u2     : {s.tip_speed:10.1f} m/s "
                    f"(마하수 {s.tip_mach:.3f})")
-        out.append(f"      흡입구 외경 D_eye: {s.eye_diameter_mm:10.1f} mm")
+        out.append(f"      흡입구 외경 D_eye: {s.eye_diameter_mm:10.1f} mm "
+                   f"(축방향 마하수 {s.eye_mach:.3f})")
+        out.append(f"      흡입 체적유량 Q  : {s.volume_flow * 3600:10.1f} m3/h")
         out.append(f"      헤드/일 계수     : psi {s.head_coefficient:.3f} / "
                    f"lambda {s.work_coefficient:.3f}")
-        out.append(f"      비속도 / 비직경  : Ns {s.specific_speed:.3f} / "
-                   f"Ds {s.specific_diameter:.3f}")
+        out.append(f"      비속도 Ns        : {s.specific_speed:10.3f}")
         out.append(f"      유량계수 phi     : {s.flow_coefficient:10.4f}")
-        for w in s.warnings:
-            out.append(f"      ! {w}")
+    for w in machine.warnings:
+        out.append(f"  ! {w}")
     return "\n".join(out)
 
 
@@ -1237,13 +1445,23 @@ def format_iplv(res: IplvResult) -> str:
 # svg.py
 # ==========================================================================
 
-# 검증된 색 (light / dark 두 벌)
+# ---------------------------------------------------------------------------
+# 색
+# ---------------------------------------------------------------------------
+# 사이클(파랑·주황)은 눈에 띄게, 보조선은 뒤로 물러나게 잡았다.
+# 보조선끼리는 색만이 아니라 '선 모양'과 '라벨'로도 구분되므로
+# 색을 못 알아봐도 읽을 수 있다.
+
 COLORS_LIGHT = {
     "cycle": "#2a78d6",
     "compression": "#eb6834",
-    "dome": "#b8b7b0",
-    "grid": "#e5e4df",
-    "axis": "#d8d7d1",
+    "dome": "#6f6e68",
+    "isotherm": "#5d9c74",
+    "quality": "#9a9992",
+    "isentrope": "#8b82bb",
+    "isochore": "#a98a5e",
+    "grid": "#ebeae5",
+    "axis": "#cfcec8",
     "text": "#52514e",
     "text_strong": "#0b0b0b",
     "surface": "#fcfcfb",
@@ -1251,13 +1469,42 @@ COLORS_LIGHT = {
 COLORS_DARK = {
     "cycle": "#3987e5",
     "compression": "#d95926",
-    "dome": "#6b6a64",
-    "grid": "#2c2c2a",
+    "dome": "#9b9a92",
+    "isotherm": "#5fa87b",
+    "quality": "#6f6e68",
+    "isentrope": "#9085e9",
+    "isochore": "#b08f5c",
+    "grid": "#262625",
     "axis": "#3a3a37",
     "text": "#c3c2b7",
     "text_strong": "#ffffff",
     "surface": "#1a1a19",
 }
+
+#: 보조선의 선 모양 (색을 못 구분해도 알아볼 수 있게)
+DASH = {
+    "isotherm": "",
+    "quality": "1.5 3",
+    "isentrope": "6 3",
+    "isochore": "8 2.5 1.5 2.5",
+}
+
+
+@dataclass
+class ChartOptions:
+    """선도에 무엇을 그릴지."""
+
+    isotherms: bool = True
+    quality: bool = True
+    isentropes: bool = True
+    isochores: bool = True
+    labels: bool = True
+    width: float = 900.0
+    height: float = 640.0
+    dark: bool = False
+    #: 사이클 주변을 얼마나 넓게 보여줄지 (0.3 이면 양옆 30% 여유)
+    margin: float = 0.32
+    legend: bool = True
 
 
 @dataclass
@@ -1283,11 +1530,32 @@ class _Box:
     def y(self, p: float) -> float:
         span = self.log_p_max - self.log_p_min or 1.0
         inner = self.height - self.pad_top - self.pad_bottom
-        frac = (math.log10(max(p, 1e-6)) - self.log_p_min) / span
+        frac = (math.log10(max(p, 1e-9)) - self.log_p_min) / span
         return self.height - self.pad_bottom - frac * inner
 
+    @property
+    def p_min(self) -> float:
+        return 10.0**self.log_p_min
 
-def _esc(text: str) -> str:
+    @property
+    def p_max(self) -> float:
+        return 10.0**self.log_p_max
+
+    def inside(self, h: float, p: float) -> bool:
+        return self.h_min <= h <= self.h_max and self.p_min <= p <= self.p_max
+
+
+def _sig(value: float, digits: int = 2) -> str:
+    """유효숫자 몇 자리로 짧게 적는다 (0.01147 -> 0.011)."""
+    if value == 0:
+        return "0"
+    exp = math.floor(math.log10(abs(value)))
+    rounded = round(value, -(exp - digits + 1))
+    text = f"{rounded:.{max(0, digits - 1 - exp)}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _esc(text) -> str:
     return (
         str(text)
         .replace("&", "&amp;")
@@ -1297,209 +1565,532 @@ def _esc(text: str) -> str:
     )
 
 
-def _nice_pressure_ticks(p_min: float, p_max: float) -> list[float]:
-    """로그 축에 찍을 눈금 값을 고른다 (1·2·5 × 10^n)."""
+# ---------------------------------------------------------------------------
+# 눈금
+# ---------------------------------------------------------------------------
+
+def _pressure_ticks(p_min: float, p_max: float) -> list[float]:
+    """로그 축 눈금 (1·2·3·5 × 10^n)."""
     ticks: list[float] = []
     exp = math.floor(math.log10(p_min))
-    while True:
-        base = 10.0**exp
-        for m in (1, 2, 5):
-            v = m * base
+    while 10.0**exp <= p_max * 10:
+        for m in (1, 2, 3, 5):
+            v = m * 10.0**exp
             if p_min <= v <= p_max:
                 ticks.append(v)
-        if base > p_max:
-            break
         exp += 1
     return ticks
 
 
-def _nice_enthalpy_ticks(h_min: float, h_max: float, target: int = 6) -> list[float]:
-    """가로축 눈금을 보기 좋은 간격으로 고른다."""
+def _enthalpy_ticks(h_min: float, h_max: float, target: int = 8) -> list[float]:
     span = h_max - h_min
     if span <= 0:
         return [h_min]
     raw = span / target
     exp = math.floor(math.log10(raw))
+    step = 10.0**exp
     for m in (1, 2, 2.5, 5, 10):
-        step = m * 10.0**exp
-        if step >= raw:
+        if m * 10.0**exp >= raw:
+            step = m * 10.0**exp
             break
-    start = math.ceil(h_min / step) * step
-    ticks = []
-    v = start
+    ticks: list[float] = []
+    v = math.ceil(h_min / step) * step
     while v <= h_max:
         ticks.append(v)
         v += step
     return ticks
 
 
-def _label_offsets(res: CycleResult, box: _Box) -> list[tuple[float, float]]:
-    """상태점 번호가 겹치지 않게 흩어 놓는다."""
-    offsets: list[tuple[float, float]] = []
-    placed: list[tuple[float, float]] = []
-    for s in res.states:
-        px, py = box.x(s.h), box.y(s.p)
-        crowded = sum(1 for qx, qy in placed if abs(qx - px) < 14 and abs(qy - py) < 14)
-        offsets.append([(9, -7), (9, 15), (-15, -7), (-15, 15)][crowded % 4])
-        placed.append((px, py))
-    return offsets
+def _nice_step(span: float, target: int) -> float:
+    """보조선 간격을 보기 좋은 값으로 고른다."""
+    if span <= 0:
+        return 1.0
+    raw = span / max(target, 1)
+    exp = math.floor(math.log10(raw))
+    for m in (1, 2, 2.5, 5, 10):
+        if m * 10.0**exp >= raw:
+            return m * 10.0**exp
+    return 10.0**(exp + 1)
 
+
+# ---------------------------------------------------------------------------
+# 보조선 계산
+# ---------------------------------------------------------------------------
+
+def _p_grid(box: _Box, n: int = 46) -> list[float]:
+    """압력 축을 로그로 균등 분할한다."""
+    lo, hi = box.log_p_min, box.log_p_max
+    return [10.0 ** (lo + (hi - lo) * i / (n - 1)) for i in range(n)]
+
+
+def _saturation(fluid: str, box: _Box, n: int = 140):
+    """포화액선·포화증기선. (h, p) 목록 두 개를 돌려준다."""
+    t_crit = props.t_crit(fluid)
+    t_hi = t_crit - 0.15
+    t_lo = props.t_sat(fluid, box.p_min, q=1) - 25.0
+    liq: list[tuple[float, float]] = []
+    vap: list[tuple[float, float]] = []
+    for i in range(n):
+        t = t_lo + (t_hi - t_lo) * i / (n - 1)
+        try:
+            p = props.p_sat(fluid, t, q=1)
+            liq.append((props.h_sat(fluid, t, 0), p))
+            vap.append((props.h_sat(fluid, t, 1), p))
+        except Exception:
+            continue
+    return liq, vap
+
+
+def _isotherm(fluid: str, t: float, box: _Box) -> list[tuple[float, float]]:
+    """등온선 하나. 액 -> 2상(수평) -> 과열증기 순으로 이어 붙인다."""
+    pts: list[tuple[float, float]] = []
+    t_crit = props.t_crit(fluid)
+
+    if t >= t_crit:
+        for p in reversed(_p_grid(box, 40)):
+            try:
+                pts.append((props.h_tp(fluid, t, p), p))
+            except Exception:
+                continue
+        return pts
+
+    try:
+        p_sat = props.p_sat(fluid, t, q=1)
+        h_f = props.h_sat(fluid, t, 0)
+        h_g = props.h_sat(fluid, t, 1)
+    except Exception:
+        return pts
+
+    # 1) 과냉 액 구간 : 높은 압력에서 포화압까지 (거의 수직)
+    if p_sat < box.p_max:
+        for p in sorted((p for p in _p_grid(box, 16) if p > p_sat), reverse=True):
+            try:
+                pts.append((props.h_tp(fluid, t, p), p))
+            except Exception:
+                continue
+    pts.append((h_f, p_sat))
+
+    # 2) 2상 구간 : 포화압에서 수평
+    pts.append((h_g, p_sat))
+
+    # 3) 과열 증기 구간 : 포화압에서 낮은 압력으로
+    for p in sorted(p for p in _p_grid(box, 30) if p < p_sat):
+        try:
+            pts.append((props.h_tp(fluid, t, p), p))
+        except Exception:
+            continue
+    return pts
+
+
+def _quality_line(fluid: str, x: float, box: _Box, n: int = 70):
+    """등건도선 (포화 영역 안)."""
+    t_crit = props.t_crit(fluid)
+    t_hi = t_crit - 0.3
+    t_lo = props.t_sat(fluid, box.p_min, q=1) - 20.0
+    pts: list[tuple[float, float]] = []
+    for i in range(n):
+        t = t_lo + (t_hi - t_lo) * i / (n - 1)
+        try:
+            p = props.p_sat(fluid, t, q=1)
+            h_f = props.h_sat(fluid, t, 0)
+            h_g = props.h_sat(fluid, t, 1)
+        except Exception:
+            continue
+        pts.append((h_f + x * (h_g - h_f), p))
+    return pts
+
+
+def _isentrope(fluid: str, s: float, box: _Box, n: int = 52):
+    """등엔트로피선 (과열 증기 영역만).
+
+    포화(2상) 영역 안에서는 등엔트로피선을 그리지 않는다.
+    실제 선도도 과열 영역에만 그린다.
+    """
+    pts: list[tuple[float, float]] = []
+    for p in _p_grid(box, n):
+        try:
+            h = props.h_sp(fluid, s, p)
+            # 과열증기 쪽만 남긴다. 2상·과냉액 구간은 선을 끊는다.
+            if h <= props.h_sat(fluid, props.t_sat(fluid, p, q=1), 1):
+                pts.append((float("nan"), p))
+                continue
+            pts.append((h, p))
+        except Exception:
+            pts.append((float("nan"), p))
+    return pts
+
+
+def _isochore(fluid: str, density: float, box: _Box, n: int = 52):
+    """등비체적선 (과열 증기 영역만)."""
+    pts: list[tuple[float, float]] = []
+    for p in _p_grid(box, n):
+        try:
+            if props.in_two_phase(props.q_dp(fluid, density, p)):
+                pts.append((float("nan"), p))
+                continue
+            pts.append((props.h_dp(fluid, density, p), p))
+        except Exception:
+            pts.append((float("nan"), p))
+    return pts
+
+
+# ---------------------------------------------------------------------------
+# 그리기 도우미
+# ---------------------------------------------------------------------------
+
+def _polyline(pts: Iterable[tuple[float, float]], box: _Box) -> str:
+    """보이는 구간만 이어서 path 문자열을 만든다.
+
+    엔탈피가 nan 이면 그 자리에서 선을 끊는다 (2상 영역을 건너뛸 때 쓴다).
+    """
+    d: list[str] = []
+    pen = False
+    prev_inside = False
+    for h, p in pts:
+        if h != h:            # nan
+            pen = False
+            prev_inside = False
+            continue
+        inside = box.inside(h, p)
+        if not inside and not prev_inside:
+            pen = False
+            prev_inside = False
+            continue
+        # 경계를 넘나드는 점은 한 번 더 찍어 선이 끊기지 않게 한다
+        d.append(("L" if pen else "M") + f"{box.x(h):.1f},{box.y(p):.1f}")
+        pen = True
+        prev_inside = inside
+    return " ".join(d)
+
+
+@dataclass
+class _Labeller:
+    """라벨이 서로 겹치지 않게 놓는다."""
+
+    placed: list[tuple[float, float]] = field(default_factory=list)
+    min_gap: float = 26.0
+
+    def try_place(self, x: float, y: float) -> bool:
+        for px, py in self.placed:
+            if abs(px - x) < self.min_gap and abs(py - y) < 13:
+                return False
+        self.placed.append((x, y))
+        return True
+
+
+def _label_at_edge(
+    pts: list[tuple[float, float]], box: _Box, side: str
+) -> Optional[tuple[float, float]]:
+    """선이 화면 가장자리에 닿는 지점을 찾아 라벨 자리로 준다."""
+    inside = [(h, p) for h, p in pts if box.inside(h, p)]
+    if not inside:
+        return None
+    if side == "bottom":
+        h, p = min(inside, key=lambda hp: hp[1])
+    elif side == "top":
+        h, p = max(inside, key=lambda hp: hp[1])
+    elif side == "right":
+        h, p = max(inside, key=lambda hp: hp[0])
+    else:
+        h, p = min(inside, key=lambda hp: hp[0])
+    return box.x(h), box.y(p)
+
+
+# ---------------------------------------------------------------------------
+# 본체
+# ---------------------------------------------------------------------------
 
 def ph_diagram_svg(
     res: CycleResult,
-    width: float = 720,
-    height: float = 520,
+    width: Optional[float] = None,
+    height: Optional[float] = None,
     dark: bool = False,
+    options: Optional[ChartOptions] = None,
 ) -> str:
-    """사이클을 P-h 선도 SVG 문자열로 만든다."""
-    c = COLORS_DARK if dark else COLORS_LIGHT
+    """사이클을 실제 냉매 선도 모양의 P-h 선도로 그린다."""
+    opt = options or ChartOptions()
+    if width is not None:
+        opt.width = width
+    if height is not None:
+        opt.height = height
+    opt.dark = dark or opt.dark
+
+    c = COLORS_DARK if opt.dark else COLORS_LIGHT
     fluid = res.refrigerant
+    W, H = opt.width, opt.height
 
-    # --- 포화선 ---
-    dome_liq: list[tuple[float, float]] = []
-    dome_vap: list[tuple[float, float]] = []
-    t_top = props.t_crit(fluid) - 0.5
-    t_bot = max(-80.0, t_top - 160.0)
-    steps = 100
-    for i in range(steps + 1):
-        t = t_bot + (t_top - t_bot) * i / steps
-        try:
-            p = props.p_sat(fluid, t, q=1)
-            dome_liq.append((props.h_sat(fluid, t, 0), p))
-            dome_vap.append((props.h_sat(fluid, t, 1), p))
-        except Exception:
-            continue
-
-    cycle_pts = [(s.h, s.p) for s in res.states]
-    closed = cycle_pts + cycle_pts[:1]
-
-    # --- 표시 범위: 사이클이 가운데 오도록 여유를 준다 ---
-    hs = [h for h, _ in cycle_pts]
-    ps = [p for _, p in cycle_pts]
-    h_margin = (max(hs) - min(hs)) * 0.30
-    h_min, h_max = min(hs) - h_margin, max(hs) + h_margin
-    p_min, p_max = min(ps) * 0.5, max(ps) * 2.0
-
-    box = _Box(width, height, 74, 24, 46, 52, h_min, h_max,
-               math.log10(p_min), math.log10(p_max))
+    # --- 표시 범위 ---
+    hs = [s.h for s in res.states]
+    ps = [s.p for s in res.states]
+    h_pad = (max(hs) - min(hs)) * opt.margin
+    box = _Box(
+        W, H, 78, 30, 74 if opt.legend else 46, 56,
+        min(hs) - h_pad, max(hs) + h_pad,
+        math.log10(min(ps) * 0.42), math.log10(max(ps) * 2.6),
+    )
 
     out: list[str] = []
     add = out.append
     add(
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W:.0f} {H:.0f}" '
         f'width="100%" role="img" aria-label="P-h 선도" '
-        f'style="max-width:{width:.0f}px;font-family:system-ui,sans-serif">'
+        f'style="max-width:{W:.0f}px;height:auto;'
+        f'font-family:system-ui,-apple-system,sans-serif">'
     )
-    add(f'<rect width="{width}" height="{height}" fill="{c["surface"]}"/>')
-
-    # 그래프 영역 밖으로 선이 삐져나오지 않게 잘라낸다
-    plot_w = width - box.pad_left - box.pad_right
-    plot_h = height - box.pad_top - box.pad_bottom
+    add(f'<rect width="{W}" height="{H}" fill="{c["surface"]}"/>')
+    pw = W - box.pad_left - box.pad_right
+    ph = H - box.pad_top - box.pad_bottom
     add(
-        f'<clipPath id="plot"><rect x="{box.pad_left}" y="{box.pad_top}" '
-        f'width="{plot_w}" height="{plot_h}"/></clipPath>'
+        f'<clipPath id="pl"><rect x="{box.pad_left}" y="{box.pad_top}" '
+        f'width="{pw}" height="{ph}"/></clipPath>'
     )
 
-    # --- 격자와 눈금 ---
-    for p in _nice_pressure_ticks(p_min, p_max):
+    # --- 격자 ---
+    for p in _pressure_ticks(box.p_min, box.p_max):
         y = box.y(p)
-        add(f'<line x1="{box.pad_left}" y1="{y:.1f}" x2="{width - box.pad_right}" '
+        add(f'<line x1="{box.pad_left}" y1="{y:.1f}" x2="{W - box.pad_right}" '
             f'y2="{y:.1f}" stroke="{c["grid"]}" stroke-width="1"/>')
         add(f'<text x="{box.pad_left - 8}" y="{y + 4:.1f}" text-anchor="end" '
             f'font-size="11" fill="{c["text"]}">{p:,.0f}</text>')
-    for h in _nice_enthalpy_ticks(h_min, h_max):
+    for h in _enthalpy_ticks(box.h_min, box.h_max):
         x = box.x(h)
         add(f'<line x1="{x:.1f}" y1="{box.pad_top}" x2="{x:.1f}" '
-            f'y2="{height - box.pad_bottom}" stroke="{c["grid"]}" stroke-width="1"/>')
-        add(f'<text x="{x:.1f}" y="{height - box.pad_bottom + 18:.1f}" '
+            f'y2="{H - box.pad_bottom}" stroke="{c["grid"]}" stroke-width="1"/>')
+        add(f'<text x="{x:.1f}" y="{H - box.pad_bottom + 18:.1f}" '
             f'text-anchor="middle" font-size="11" fill="{c["text"]}">{h:,.0f}</text>')
 
-    # --- 축 ---
-    add(f'<line x1="{box.pad_left}" y1="{box.pad_top}" x2="{box.pad_left}" '
-        f'y2="{height - box.pad_bottom}" stroke="{c["axis"]}" stroke-width="1"/>')
-    add(f'<line x1="{box.pad_left}" y1="{height - box.pad_bottom}" '
-        f'x2="{width - box.pad_right}" y2="{height - box.pad_bottom}" '
-        f'stroke="{c["axis"]}" stroke-width="1"/>')
+    add('<g clip-path="url(#pl)">')
+    labeller = _Labeller()
+    label_bits: list[str] = []
 
-    add('<g clip-path="url(#plot)">')
+    def draw(pts, color, dash, wdt=1.0, opacity=1.0):
+        d = _polyline(pts, box)
+        if d:
+            dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+            add(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{wdt}"'
+                f'{dash_attr} stroke-opacity="{opacity}" stroke-linejoin="round"/>')
+        return d
+
+    def put_label(pts, side, text, color, dx=0.0, dy=0.0, anchor="middle"):
+        if not opt.labels:
+            return
+        spot = _label_at_edge(pts, box, side)
+        if spot is None:
+            return
+        x, y = spot[0] + dx, spot[1] + dy
+        # 글자가 그래프 밖으로 삐져나가지 않게 가둔다
+        half = len(str(text)) * 3.2
+        x = min(max(x, box.pad_left + half + 2), W - box.pad_right - half - 2)
+        y = min(max(y, box.pad_top + 11), H - box.pad_bottom - 4)
+        if not labeller.try_place(x, y):
+            return
+        label_bits.append(
+            f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}" font-size="10" '
+            f'fill="{color}" paint-order="stroke" stroke="{c["surface"]}" '
+            f'stroke-width="3" stroke-linejoin="round">{_esc(text)}</text>'
+        )
+
+    t_crit = props.t_crit(fluid)
+
+    # --- 등온선 ---
+    if opt.isotherms:
+        t_lo = props.t_sat(fluid, box.p_min, q=1)
+        t_hi = min(t_crit + 10.0, props.t_hp(fluid, box.h_max, box.p_min))
+        step = _nice_step(t_hi - t_lo, 11)
+        t = math.ceil(t_lo / step) * step
+        while t <= t_hi:
+            pts = _isotherm(fluid, t, box)
+            if draw(pts, c["isotherm"], DASH["isotherm"], 0.9, 0.85):
+                put_label(pts, "bottom", f"{t:g}°C", c["isotherm"], 0, -5)
+            t += step
+
+    # --- 등건도선 ---
+    if opt.quality:
+        for x_q in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+            pts = _quality_line(fluid, x_q, box)
+            if draw(pts, c["quality"], DASH["quality"], 0.9, 0.9):
+                put_label(pts, "bottom", f"{x_q:.1f}", c["quality"], 0, -5)
+
+    # --- 등엔트로피선 ---
+    # 포화증기선 근처에만 몰리지 않도록, 화면 오른쪽 끝(과열 깊은 곳)까지
+    # 걸치는 범위를 잡는다.
+    if opt.isentropes:
+        try:
+            # 화면에 보이는 '과열증기 영역' 안에서만 s 범위를 잡는다.
+            # 과냉액까지 포함하면 범위가 지나치게 넓어져,
+            # 정작 압축 구간 주변에는 선이 한 줄도 안 그려진다.
+            candidates = []
+            for pp in (box.p_min, math.sqrt(box.p_min * box.p_max), box.p_max):
+                try:
+                    candidates.append(
+                        props.s_sat(fluid, props.t_sat(fluid, pp, q=1), 1)
+                    )
+                except Exception:
+                    continue
+            for pp in (box.p_min, box.p_max):
+                try:
+                    candidates.append(props.s_hp(fluid, box.h_max, pp))
+                except Exception:
+                    continue
+            if not candidates:
+                raise ValueError("등엔트로피선 범위를 잡을 수 없다")
+            lo, hi = min(candidates), max(candidates)
+            step = _nice_step(hi - lo, 9)
+            sv = math.ceil(lo / step) * step
+            while sv <= hi + 1e-9:
+                pts = _isentrope(fluid, sv, box)
+                if draw(pts, c["isentrope"], DASH["isentrope"], 0.9, 0.85):
+                    put_label(pts, "top", f"s={sv:g}", c["isentrope"], 0, 13)
+                sv += step
+        except Exception:
+            pass
+
+    # --- 등비체적선 ---
+    if opt.isochores:
+        try:
+            d_lo = props.d_tp(fluid, props.t_sat(fluid, box.p_min, q=1) + 1, box.p_min)
+            d_hi = props.d_tp(fluid, props.t_sat(fluid, box.p_max, q=1) + 1, box.p_max)
+            steps = 5
+            for i in range(steps + 1):
+                dens = d_lo * (d_hi / d_lo) ** (i / steps)
+                pts = _isochore(fluid, dens, box)
+                if draw(pts, c["isochore"], DASH["isochore"], 0.9, 0.8):
+                    put_label(pts, "right", f"v={_sig(1 / dens)}", c["isochore"],
+                              -4, -5, "end")
+        except Exception:
+            pass
 
     # --- 포화선 ---
-    for pts in (dome_liq, dome_vap):
-        d = _path(pts, box, h_min, h_max, p_min, p_max)
-        if d:
-            add(f'<path d="{d}" fill="none" stroke="{c["dome"]}" stroke-width="2" '
-                f'stroke-linejoin="round"/>')
+    liq, vap = _saturation(fluid, box)
+    draw(liq, c["dome"], "", 2.2)
+    draw(vap, c["dome"], "", 2.2)
 
-    # --- 사이클 경로 ---
+    # --- 임계점 ---
+    try:
+        from CoolProp.CoolProp import PropsSI as _P
+
+        name = props.normalize(fluid)
+        p_crit = _P("Pcrit", "", 0, "", 0, name) / 1000.0
+        h_crit = props.h_tp(fluid, t_crit + 0.05, p_crit)
+        if box.inside(h_crit, p_crit):
+            add(f'<circle cx="{box.x(h_crit):.1f}" cy="{box.y(p_crit):.1f}" r="3.5" '
+                f'fill="none" stroke="{c["dome"]}" stroke-width="1.6"/>')
+            label_bits.append(
+                f'<text x="{box.x(h_crit):.1f}" y="{box.y(p_crit) - 8:.1f}" '
+                f'text-anchor="middle" font-size="10" fill="{c["text"]}" '
+                f'paint-order="stroke" stroke="{c["surface"]}" stroke-width="3">'
+                f'임계점</text>'
+            )
+    except Exception:
+        pass
+
+    # --- 사이클 ---
+    cycle = [(s.h, s.p) for s in res.states]
     d = " ".join(
         ("M" if i == 0 else "L") + f"{box.x(h):.1f},{box.y(p):.1f}"
-        for i, (h, p) in enumerate(closed)
+        for i, (h, p) in enumerate(cycle + cycle[:1])
     )
-    add(f'<path d="{d}" fill="none" stroke="{c["cycle"]}" stroke-width="2" '
+    add(f'<path d="{d}" fill="none" stroke="{c["cycle"]}" stroke-width="2.4" '
         f'stroke-linejoin="round"/>')
 
-    # --- 압축 구간 강조 ---
-    segments = ((1, 2),) if res.stages == 1 else ((1, 2), (3, 4))
-    for a, b in segments:
+    for a, b in (((1, 2),) if res.stages == 1 else ((1, 2), (3, 4))):
         sa, sb = res.state(a), res.state(b)
         add(f'<line x1="{box.x(sa.h):.1f}" y1="{box.y(sa.p):.1f}" '
             f'x2="{box.x(sb.h):.1f}" y2="{box.y(sb.p):.1f}" '
-            f'stroke="{c["compression"]}" stroke-width="3.5" stroke-linecap="round"/>')
+            f'stroke="{c["compression"]}" stroke-width="4" stroke-linecap="round"/>')
 
-    add('</g>')
+    add("".join(label_bits))
+    add("</g>")
 
     # --- 상태점 ---
-    for s, (dx, dy) in zip(res.states, _label_offsets(res, box)):
+    for s, (dx, dy) in zip(res.states, _state_offsets(res, box)):
         px, py = box.x(s.h), box.y(s.p)
-        add(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4.5" fill="{c["cycle"]}" '
-            f'stroke="{c["surface"]}" stroke-width="2"/>')
-        add(f'<title>{_esc(f"{s.no}. {s.name} — {s.t:.2f}°C, {s.p:.1f} kPa, {s.h:.2f} kJ/kg")}</title>')
-        add(f'<text x="{px + dx:.1f}" y="{py + dy:.1f}" font-size="12" '
-            f'font-weight="600" fill="{c["text_strong"]}">{s.no}</text>')
+        add(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4.8" fill="{c["cycle"]}" '
+            f'stroke="{c["surface"]}" stroke-width="2">'
+            f'<title>{_esc(f"{s.no}. {s.name} / {s.t:.2f}°C / {s.p:.1f} kPa / {s.h:.2f} kJ/kg")}'
+            f'</title></circle>')
+        add(f'<text x="{px + dx:.1f}" y="{py + dy:.1f}" font-size="12.5" '
+            f'font-weight="700" fill="{c["text_strong"]}" paint-order="stroke" '
+            f'stroke="{c["surface"]}" stroke-width="3.5" stroke-linejoin="round">'
+            f'{s.no}</text>')
 
-    # --- 축 제목과 범례 ---
-    add(f'<text x="{width / 2:.0f}" y="{height - 8:.0f}" text-anchor="middle" '
-        f'font-size="12" fill="{c["text"]}">엔탈피 h [kJ/kg]</text>')
-    add(f'<text x="16" y="{height / 2:.0f}" text-anchor="middle" font-size="12" '
-        f'fill="{c["text"]}" transform="rotate(-90 16 {height / 2:.0f})">'
+    # --- 축 ---
+    add(f'<line x1="{box.pad_left}" y1="{box.pad_top}" x2="{box.pad_left}" '
+        f'y2="{H - box.pad_bottom}" stroke="{c["axis"]}" stroke-width="1"/>')
+    add(f'<line x1="{box.pad_left}" y1="{H - box.pad_bottom}" '
+        f'x2="{W - box.pad_right}" y2="{H - box.pad_bottom}" '
+        f'stroke="{c["axis"]}" stroke-width="1"/>')
+    add(f'<text x="{W / 2:.0f}" y="{H - 10:.0f}" text-anchor="middle" font-size="12" '
+        f'fill="{c["text"]}">엔탈피 h [kJ/kg]</text>')
+    add(f'<text x="17" y="{H / 2:.0f}" text-anchor="middle" font-size="12" '
+        f'fill="{c["text"]}" transform="rotate(-90 17 {H / 2:.0f})">'
         f'압력 P [kPa] (로그)</text>')
-    add(f'<text x="{box.pad_left}" y="24" font-size="13" font-weight="600" '
-        f'fill="{c["text_strong"]}">{_esc(fluid)} · {res.stages}단 · COP {res.cop:.2f}</text>')
+    add(f'<text x="{box.pad_left}" y="26" font-size="13.5" font-weight="700" '
+        f'fill="{c["text_strong"]}">{_esc(fluid)} · {res.stages}단 압축 · '
+        f'COP {res.cop:.2f}</text>')
 
-    lx, ly = width - box.pad_right - 150, box.pad_top + 14
-    for i, (color, name) in enumerate(
-        ((c["dome"], "포화선"), (c["cycle"], "사이클"), (c["compression"], "압축"))
-    ):
-        y = ly + i * 17
-        add(f'<line x1="{lx}" y1="{y}" x2="{lx + 22}" y2="{y}" stroke="{color}" '
-            f'stroke-width="3" stroke-linecap="round"/>')
-        add(f'<text x="{lx + 28}" y="{y + 4}" font-size="11" fill="{c["text"]}">'
-            f'{name}</text>')
+    # --- 범례 ---
+    if opt.legend:
+        add(_legend(c, opt, W, box))
+
 
     add("</svg>")
     return "".join(out)
 
 
-def _path(
-    pts: list[tuple[float, float]],
-    box: _Box,
-    h_min: float,
-    h_max: float,
-    p_min: float,
-    p_max: float,
-) -> str:
-    """보이는 범위 안의 점들만 이어 경로를 만든다."""
-    d: list[str] = []
-    pen_down = False
-    for h, p in pts:
-        visible = (h_min - 200 <= h <= h_max + 200) and (p_min * 0.2 <= p <= p_max * 5)
-        if not visible:
-            pen_down = False
-            continue
-        cmd = "L" if pen_down else "M"
-        d.append(f"{cmd}{box.x(h):.1f},{box.y(p):.1f}")
-        pen_down = True
-    return " ".join(d)
+def _legend(c: dict, opt: ChartOptions, W: float, box: _Box) -> str:
+    """범례를 그래프 위쪽 바깥에 가로로 한 줄 놓는다.
+
+    그래프 안에 두면 포화선이나 보조선을 가려서 밖으로 뺐다.
+    """
+    rows = [
+        (c["cycle"], "", "사이클"),
+        (c["compression"], "", "압축"),
+        (c["dome"], "", "포화선"),
+    ]
+    if opt.isotherms:
+        rows.append((c["isotherm"], DASH["isotherm"], "등온선 [°C]"))
+    if opt.quality:
+        rows.append((c["quality"], DASH["quality"], "등건도선 x"))
+    if opt.isentropes:
+        rows.append((c["isentrope"], DASH["isentrope"], "등엔트로피선 s [kJ/kg·K]"))
+    if opt.isochores:
+        rows.append((c["isochore"], DASH["isochore"], "등비체적선 v [m³/kg]"))
+
+    out: list[str] = []
+    x = box.pad_left
+    y = 46.0
+    line_h = 17.0
+    avail = W - box.pad_left - box.pad_right
+
+    for color, dash, name in rows:
+        w = 30 + len(name) * 6.6 + 14   # 글자 폭 어림
+        if x - box.pad_left + w > avail:   # 줄이 넘치면 다음 줄로
+            x = box.pad_left
+            y += line_h
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+        out.append(
+            f'<line x1="{x:.1f}" y1="{y:.1f}" x2="{x + 22:.1f}" y2="{y:.1f}" '
+            f'stroke="{color}" stroke-width="2.2"{dash_attr} stroke-linecap="round"/>'
+        )
+        out.append(
+            f'<text x="{x + 27:.1f}" y="{y + 3.5:.1f}" font-size="10.5" '
+            f'fill="{c["text"]}">{_esc(name)}</text>'
+        )
+        x += w
+    return "".join(out)
+
+
+def _state_offsets(res: CycleResult, box: _Box) -> list[tuple[float, float]]:
+    """상태점 번호가 겹치지 않게 흩어 놓는다."""
+    offsets: list[tuple[float, float]] = []
+    placed: list[tuple[float, float]] = []
+    for s in res.states:
+        px, py = box.x(s.h), box.y(s.p)
+        crowded = sum(1 for qx, qy in placed if abs(qx - px) < 15 and abs(qy - py) < 15)
+        offsets.append([(9, -8), (9, 16), (-16, -8), (-16, 16)][crowded % 4])
+        placed.append((px, py))
+    return offsets
 
 
 # ==========================================================================
@@ -1507,12 +2098,23 @@ def _path(
 # ==========================================================================
 
 import html as html_mod
+import os
 import socket
+import subprocess
 import threading
+import time
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+
+#: 이미 떠 있는 프로그램을 찾을 때 뒤져볼 포트 범위
+PORT_RANGE = range(8765, 8785)
+
+#: /ping 이 돌려주는 표시. 우리 프로그램인지 확인하는 용도.
+PING_TOKEN = "turbochiller-ok"
 
 REFRIGERANTS = [
     "R1234ze(E)",
@@ -1568,8 +2170,22 @@ FIELDS: tuple[Field, ...] = (
           hint="비워두면 에너지 밸런스로 계산"),
 
     Field("t_cond_max", "최대 응축온도 [°C]", 70.0, step="1", group="기타"),
-    Field("psi", "임펠러 압력계수 ψ", 0.60, step="0.01", group="기타"),
-    Field("specific_speed", "임펠러 비속도 Ns", 0.70, step="0.01", group="기타"),
+
+    Field("rpm", "축 회전수 [rpm]", "", step="100", group="임펠러 (비우면 자동)",
+          hint="모터·인버터 회전수가 정해져 있을 때"),
+    Field("d2_mm", "1단 임펠러 외경 [mm]", "", step="1", group="임펠러 (비우면 자동)",
+          hint="기존 임펠러를 쓸 수 있는지 볼 때"),
+    Field("d2b_mm", "2단 임펠러 외경 [mm]", "", step="1", group="임펠러 (비우면 자동)"),
+    Field("deye_mm", "1단 흡입구 외경 [mm]", "", step="1", group="임펠러 (비우면 자동)",
+          hint="비우면 축방향 마하수 0.30 기준으로 계산"),
+    Field("psi", "압력계수 ψ", "", step="0.01", group="임펠러 (비우면 자동)",
+          hint="ψ·회전수·외경 중 둘만 정하면 나머지는 따라 나온다"),
+    Field("specific_speed", "목표 비속도 Ns", 0.70, step="0.01",
+          group="임펠러 (비우면 자동)",
+          hint="아무것도 안 정했을 때 회전수를 잡는 기준"),
+    Field("geared", "기어 내장형 (단별 회전수 다름)", False, "check",
+          group="임펠러 (비우면 자동)",
+          hint="끄면 단일축 직결 — 모든 단 회전수 같음"),
     Field("excel_compat", "엑셀 호환 모드", False, "check", group="기타",
           hint="원본 엑셀과 똑같이 계산"),
     Field("show_iplv", "IPLV 계산 (조금 느림)", False, "check", group="기타"),
@@ -1711,6 +2327,14 @@ tbody tr:last-child td{border-bottom:0}
   .msg.warn{background:#38230f;color:#ffca92;border-color:#5b3a1a}
 }
 .note{color:var(--ink3);font-size:12px;margin-top:8px}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.quit{flex:0 0 auto;padding:7px 15px;border:1px solid var(--line);border-radius:8px;
+  background:var(--panel);color:var(--ink2);text-decoration:none;font-size:13px;
+  font-weight:600;white-space:nowrap}
+.quit:hover{border-color:var(--warn);color:var(--warn)}
+.bye{max-width:520px;margin:12vh auto;text-align:center;padding:26px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.bye h1{font-size:19px;margin-bottom:8px}
 @media (max-width:900px){
   .wrap{flex-direction:column}
   aside{position:static;flex:1 1 auto;width:100%}
@@ -1864,33 +2488,58 @@ def render_results(res: CycleResult, values: dict[str, Any]) -> str:
     out.append("</div>")
 
     # 임펠러
-    psi = float(values.get("psi") or 0.60)
-    ns = float(values.get("specific_speed") or 0.70)
-    sizings = [
-        size_impeller(st, inp.refrigerant, head_coefficient=psi, specific_speed=ns)
-        for st in res.stage_results
-    ]
+    def mm(key: str):
+        v = values.get(key, "")
+        return None if v == "" or v is None else float(v) / 1000.0
+
+    def opt(key: str):
+        v = values.get(key, "")
+        return None if v == "" or v is None else float(v)
+
     out.append('<div class="card"><h2>임펠러 개략 치수</h2>')
-    out.append(_table(
-        ["단", "회전수 [rpm]", "외경 [mm]", "주속 [m/s]", "마하수",
-         "흡입구 [mm]", "일계수 λ", "유량계수 φ"],
-        [
+    try:
+        machine = size_machine(
+            res,
+            Given(
+                head_coefficient=opt("psi"),
+                rpm=opt("rpm"),
+                diameter=mm("d2_mm"),
+                eye_diameter=mm("deye_mm"),
+                specific_speed=float(values.get("specific_speed") or 0.70),
+            ),
+            stage_diameters=[mm("d2_mm"), mm("d2b_mm")],
+            geared=bool(values.get("geared")),
+        )
+    except (ValueError, RuntimeError) as exc:
+        out.append(f'<div class="msg err">임펠러 계산 실패: {esc(exc)}</div></div>')
+    else:
+        out.append(
+            f'<p class="note" style="margin:0 0 10px">구동 방식 <b>{esc(machine.drive)}</b>'
+            f' &nbsp;·&nbsp; 축 회전수 <b>{machine.rpm:,.0f} rpm</b>'
+            + ("  (모든 단 공통)" if machine.drive == "단일축 직결" else "")
+            + "</p>"
+        )
+        out.append(_table(
+            ["단", "외경 [mm]", "주속 [m/s]", "선단 마하수", "흡입구 [mm]",
+             "흡입구 마하수", "흡입체적 [m³/h]", "ψ", "Ns", "φ"],
             [
-                z.stage_name, f"{z.rpm:,.0f}", f"{z.diameter_mm:.1f}",
-                f"{z.tip_speed:.1f}", f"{z.tip_mach:.3f}",
-                f"{z.eye_diameter_mm:.1f}", f"{z.work_coefficient:.3f}",
-                f"{z.flow_coefficient:.4f}",
-            ]
-            for z in sizings
-        ],
-    ))
-    for z in sizings:
-        for w in z.warnings:
-            out.append(f'<div class="msg warn">{esc(z.stage_name)}: {esc(w)}</div>')
-    out.append(
-        '<p class="note">무차원수로 잡은 1차 근사입니다. '
-        "실제 설계는 깃 형상·확산기·CFD 로 다시 확인해야 합니다.</p></div>"
-    )
+                [
+                    z.stage_name, f"{z.diameter_mm:.1f}", f"{z.tip_speed:.1f}",
+                    f"{z.tip_mach:.3f}", f"{z.eye_diameter_mm:.1f}",
+                    f"{z.eye_mach:.3f}", f"{z.volume_flow * 3600:.0f}",
+                    f"{z.head_coefficient:.3f}", f"{z.specific_speed:.3f}",
+                    f"{z.flow_coefficient:.4f}",
+                ]
+                for z in machine.stages
+            ],
+        ))
+        for w in machine.warnings:
+            out.append(f'<div class="msg warn">{esc(w)}</div>')
+        out.append(
+            '<p class="note">무차원수로 잡은 1차 근사입니다. '
+            "실제 설계는 깃 형상·확산기·CFD 로 다시 확인해야 합니다.</p>"
+        )
+        out.append("</div>")
 
     # IPLV
     if values.get("show_iplv"):
@@ -1943,9 +2592,13 @@ def render_page(query: dict[str, list[str]]) -> str:
 <div class="wrap">
   <aside><div class="card">{render_form(values)}</div></aside>
   <main>
-    <h1>터보 냉동기 사이클 해석</h1>
-    <p class="sub">왼쪽 값을 고치고 '다시 계산'을 누르세요.
-      끝내려면 검은 창에서 Ctrl+C 를 누릅니다.</p>
+    <div class="head">
+      <div>
+        <h1>터보 냉동기 사이클 해석</h1>
+        <p class="sub">왼쪽 값을 고치고 '다시 계산'을 누르세요.</p>
+      </div>
+      <a class="quit" href="/quit" title="프로그램을 완전히 끝냅니다">종료</a>
+    </div>
     {body}
   </main>
 </div>
@@ -1956,14 +2609,37 @@ def render_page(query: dict[str, list[str]]) -> str:
 # 서버
 # ---------------------------------------------------------------------------
 
+BYE_PAGE = f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>종료했습니다</title><style>{STYLE}</style></head>
+<body><div class="bye">
+  <h1>프로그램을 종료했습니다</h1>
+  <p class="sub">이 탭은 닫으셔도 됩니다.<br>
+     다시 쓰시려면 실행 파일을 두 번 누르세요.</p>
+</div></body></html>"""
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "turbochiller"
 
     def do_GET(self) -> None:  # noqa: N802  (내장 클래스가 정한 이름)
         parsed = urllib.parse.urlparse(self.path)
+
         if parsed.path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
+            return
+
+        # 이미 떠 있는 우리 프로그램인지 확인하는 용도
+        if parsed.path == "/ping":
+            self._send(PING_TOKEN.encode(), "text/plain; charset=utf-8")
+            return
+
+        if parsed.path == "/quit":
+            self._send(BYE_PAGE.encode("utf-8"))
+            # 응답을 보낸 뒤에 서버를 내린다
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
 
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
@@ -1971,49 +2647,109 @@ class _Handler(BaseHTTPRequestHandler):
             page = render_page(query)
         except Exception as exc:  # 어떤 오류든 화면에 보여준다
             page = (
-                "<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif'>"
-                f"<h2>오류가 났습니다</h2><pre>{html_mod.escape(repr(exc))}</pre></body>"
+                "<!doctype html><meta charset='utf-8'>"
+                "<body style='font-family:sans-serif;padding:24px'>"
+                f"<h2>오류가 났습니다</h2><pre>{html_mod.escape(repr(exc))}</pre>"
+                "</body>"
             )
-        data = page.encode("utf-8")
+        self._send(page.encode("utf-8"))
+
+    def _send(self, data: bytes, content_type: str = "text/html; charset=utf-8") -> None:
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass   # 브라우저가 먼저 닫은 경우
 
     def log_message(self, *args) -> None:
-        """요청 로그는 찍지 않는다 (검은 창을 깨끗하게)."""
+        """요청 로그는 찍지 않는다 (창을 깨끗하게)."""
 
 
-def _free_port(preferred: int = 8765) -> int:
+# ---------------------------------------------------------------------------
+# 포트 찾기 / 이미 떠 있는지 확인
+# ---------------------------------------------------------------------------
+
+def _port_free(port: int) -> bool:
+    with socket.socket() as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def free_port(preferred: int = 8765) -> int:
     """쓸 수 있는 포트를 고른다."""
     for port in range(preferred, preferred + 20):
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        if _port_free(port):
+            return port
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
-def serve(port: Optional[int] = None, open_browser: bool = True) -> None:
-    """웹 화면을 띄운다. Ctrl+C 로 끝낸다."""
-    port = port or _free_port()
+def find_running(timeout: float = 0.3) -> Optional[int]:
+    """이미 떠 있는 이 프로그램을 찾는다. 있으면 그 포트를 돌려준다.
+
+    실행 파일을 여러 번 눌러도 프로그램이 쌓이지 않게 하려는 것이다.
+    """
+    for port in PORT_RANGE:
+        if _port_free(port):
+            continue          # 아무도 안 쓰는 포트
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/ping", timeout=timeout
+            ) as resp:
+                if resp.read().decode().strip() == PING_TOKEN:
+                    return port
+        except (urllib.error.URLError, OSError, ValueError):
+            continue          # 다른 프로그램이 쓰는 포트
+    return None
+
+
+def _wait_until_up(port: int, timeout: float = 25.0) -> bool:
+    """서버가 응답할 때까지 기다린다."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/ping", timeout=0.5
+            ) as resp:
+                if resp.read().decode().strip() == PING_TOKEN:
+                    return True
+        except (urllib.error.URLError, OSError, ValueError):
+            time.sleep(0.25)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# 서버 실행
+# ---------------------------------------------------------------------------
+
+def serve(
+    port: Optional[int] = None,
+    open_browser: bool = True,
+    host: str = "127.0.0.1",
+    quiet: bool = False,
+) -> None:
+    """이 프로세스에서 웹 화면을 돌린다. Ctrl+C 로 끝낸다."""
+    port = port or free_port()
     url = f"http://127.0.0.1:{port}/"
-    server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    server = ThreadingHTTPServer((host, port), _Handler)
 
-    print("=" * 46)
-    print("  터보 냉동기 사이클 해석")
-    print("=" * 46)
-    print()
-    print(f"  브라우저에서 열렸습니다: {url}")
-    print("  (자동으로 안 열리면 위 주소를 직접 입력하세요)")
-    print()
-    print("  끝내려면 이 창에서 Ctrl+C 를 누르세요.")
-    print()
+    if not quiet:
+        print("=" * 46)
+        print("  터보 냉동기 사이클 해석")
+        print("=" * 46)
+        print()
+        print(f"  브라우저에서 열렸습니다: {url}")
+        print()
+        print("  끝내려면 이 창에서 Ctrl+C 를 누르거나,")
+        print("  브라우저 오른쪽 위의 '종료' 를 누르세요.")
+        print()
 
     if open_browser:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()
@@ -2021,9 +2757,131 @@ def serve(port: Optional[int] = None, open_browser: bool = True) -> None:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n종료합니다.")
+        if not quiet:
+            print("\n종료합니다.")
     finally:
         server.server_close()
+
+
+def _spawn_detached(port: int) -> bool:
+    """창 없이 백그라운드로 서버를 띄운다. 성공하면 True.
+
+    윈도우에서는 pythonw.exe 를 써서 검은 창이 아예 뜨지 않게 한다.
+    """
+    base = _relaunch_command()
+    if base is None:
+        return False
+    args = base + ["--serve", "--port", str(port), "--no-browser"]
+    log_path = os.path.join(_app_dir(), "실행오류.log")
+
+    kwargs: dict = {}
+    if os.name == "nt":
+        # CREATE_NO_WINDOW(0x08000000) + DETACHED_PROCESS(0x00000008)
+        kwargs["creationflags"] = 0x08000000 | 0x00000008
+    else:
+        kwargs["start_new_session"] = True
+
+    try:
+        log = open(log_path, "w", encoding="utf-8")
+        subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                         **kwargs)
+    except Exception:
+        return False
+    return _wait_until_up(port)
+
+
+def _app_dir() -> str:
+    """오류 기록을 남길 폴더."""
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    if script and os.path.isfile(script):
+        return os.path.dirname(script) or "."
+    return os.getcwd()
+
+
+def _relaunch_command() -> Optional[list[str]]:
+    """자기 자신을 다시 띄우는 명령을 만든다.
+
+    한 파일로 합친 배포판이면 그 파일을 직접 실행하고,
+    패키지로 설치돼 있으면 `-m turbochiller.webui` 로 실행한다.
+    """
+    python = _background_python()
+    package = globals().get("__package__") or ""
+    if package:
+        return [python, "-m", "turbochiller.webui"]
+
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    if script and os.path.isfile(script):
+        return [python, script]
+    return None
+
+
+def _background_python() -> str:
+    """창 없이 돌릴 파이썬 실행 파일 경로."""
+    exe = sys.executable
+    if os.name == "nt":
+        candidate = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return exe
+
+
+def run(port: Optional[int] = None, background: bool = True) -> None:
+    """실행 파일에서 부르는 진입점.
+
+    background=True 면 창을 남기지 않고 백그라운드로 띄운 뒤 바로 빠져나온다.
+    (검은 창을 계속 켜두지 않아도 되게 하려는 것이다)
+    """
+    existing = find_running()
+    if existing is not None:
+        url = f"http://127.0.0.1:{existing}/"
+        print(f"이미 실행 중입니다. 브라우저를 엽니다: {url}")
+        webbrowser.open(url)
+        return
+
+    port = port or free_port()
+
+    if background and _spawn_detached(port):
+        url = f"http://127.0.0.1:{port}/"
+        webbrowser.open(url)
+        print("=" * 52)
+        print("  터보 냉동기 사이클 해석 — 실행했습니다")
+        print("=" * 52)
+        print()
+        print(f"  주소 : {url}")
+        print()
+        print("  이 창은 닫으셔도 됩니다. 프로그램은 계속 돌아갑니다.")
+        print("  끝내실 때는 브라우저 오른쪽 위의 '종료' 를 누르세요.")
+        print()
+        return
+
+    # 백그라운드 실행이 안 되면 이 창에서 그대로 돌린다
+    if background:
+        print("(백그라운드 실행에 실패해 이 창에서 직접 실행합니다)")
+        print()
+    serve(port=port, open_browser=True)
+
+
+def _cli(argv: Optional[list[str]] = None) -> None:
+    """명령줄에서 부를 때."""
+    import argparse as _argparse
+
+    parser = _argparse.ArgumentParser(description="터보 냉동기 사이클 해석 — 웹 화면")
+    parser.add_argument(
+        "--serve", action="store_true",
+        help="이 창에서 서버를 직접 돌린다 (백그라운드로 띄운 쪽이 쓰는 옵션)",
+    )
+    parser.add_argument("--port", type=int, help="포트 (기본: 8765부터 빈 곳)")
+    parser.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않는다")
+    parser.add_argument(
+        "--console", action="store_true",
+        help="백그라운드로 보내지 않고 이 창에서 실행한다",
+    )
+    args = parser.parse_args(argv)
+
+    if args.serve:
+        serve(port=args.port, open_browser=not args.no_browser, quiet=True)
+    else:
+        run(port=args.port, background=not args.console)
 
 
 # ==========================================================================
@@ -2045,6 +2903,7 @@ def _main() -> None:
     parser.add_argument("--stages", type=int, choices=(1, 2), default=2, help="압축 단수")
     parser.add_argument("--t-evap", type=float, help="증발온도 [°C]")
     parser.add_argument("--t-cond", type=float, help="응축온도 [°C]")
+    parser.add_argument("--rpm", type=float, help="축 회전수 고정 [rpm]")
     args = parser.parse_args()
 
     if args.text:
@@ -2054,7 +2913,9 @@ def _main() -> None:
             t_evap=args.t_evap,
             t_cond=args.t_cond,
         )
-        print(format_report(solve(inp, stages=args.stages)))
+        result = solve(inp, stages=args.stages)
+        print(format_report(result))
+        print(format_impeller(size_machine(result, Given(rpm=args.rpm))))
         return
 
     serve(port=args.port, open_browser=not args.no_browser)

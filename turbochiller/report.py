@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .cycle import CycleResult
 from .hx import HXResult
-from .impeller import ImpellerSizing
+from .impeller import MachineSizing
 from .standards import IplvResult
 
 LINE = "=" * 78
@@ -102,23 +102,26 @@ def format_hx(results: list[HXResult]) -> str:
     return "\n".join(out)
 
 
-def format_impeller(sizings: list[ImpellerSizing]) -> str:
+def format_impeller(machine: MachineSizing) -> str:
     """임펠러 개략 설계 결과."""
     out = ["", "[ 임펠러 개략 설계 (1차 근사) ]"]
-    for s in sizings:
+    out.append(f"  구동 방식        : {machine.drive}")
+    out.append(f"  축 회전수        : {machine.rpm:10,.0f} rpm"
+               + ("   (모든 단 공통)" if machine.drive == "단일축 직결" else ""))
+    for s in machine.stages:
         out.append(f"  - {s.stage_name}")
-        out.append(f"      회전수 N         : {s.rpm:10.0f} rpm")
         out.append(f"      임펠러 외경 D2   : {s.diameter_mm:10.1f} mm")
         out.append(f"      선단 주속 u2     : {s.tip_speed:10.1f} m/s "
                    f"(마하수 {s.tip_mach:.3f})")
-        out.append(f"      흡입구 외경 D_eye: {s.eye_diameter_mm:10.1f} mm")
+        out.append(f"      흡입구 외경 D_eye: {s.eye_diameter_mm:10.1f} mm "
+                   f"(축방향 마하수 {s.eye_mach:.3f})")
+        out.append(f"      흡입 체적유량 Q  : {s.volume_flow * 3600:10.1f} m3/h")
         out.append(f"      헤드/일 계수     : psi {s.head_coefficient:.3f} / "
                    f"lambda {s.work_coefficient:.3f}")
-        out.append(f"      비속도 / 비직경  : Ns {s.specific_speed:.3f} / "
-                   f"Ds {s.specific_diameter:.3f}")
+        out.append(f"      비속도 Ns        : {s.specific_speed:10.3f}")
         out.append(f"      유량계수 phi     : {s.flow_coefficient:10.4f}")
-        for w in s.warnings:
-            out.append(f"      ! {w}")
+    for w in machine.warnings:
+        out.append(f"  ! {w}")
     return "\n".join(out)
 
 

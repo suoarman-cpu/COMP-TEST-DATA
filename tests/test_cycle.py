@@ -6,7 +6,16 @@ import math
 
 import pytest
 
-from turbochiller import CycleInput, iplv, single_stage, size_impeller, solve, two_stage
+from turbochiller import (
+    CycleInput,
+    Given,
+    iplv,
+    single_stage,
+    size_impeller,
+    size_machine,
+    solve,
+    two_stage,
+)
 
 
 def base() -> CycleInput:
@@ -138,7 +147,9 @@ def test_rejects_unsupported_stage_count() -> None:
 def test_impeller_sizing_consistency() -> None:
     """u2 = psi 로부터, D2 = 2·u2/ω 관계가 일관되어야 한다."""
     res = two_stage(base().at(t_subcond=None))
-    sizing = size_impeller(res.stage_results[0], res.refrigerant, head_coefficient=0.6)
+    sizing = size_impeller(
+        res.stage_results[0], res.refrigerant, Given(head_coefficient=0.6)
+    )
 
     omega = sizing.rpm * 2 * math.pi / 60
     assert sizing.diameter == pytest.approx(2 * sizing.tip_speed / omega, rel=1e-9)
@@ -151,15 +162,120 @@ def test_impeller_sizing_consistency() -> None:
 def test_impeller_fixed_rpm() -> None:
     """회전수를 고정하면 그 값이 그대로 쓰인다."""
     res = two_stage(base().at(t_subcond=None))
-    sizing = size_impeller(res.stage_results[0], res.refrigerant, rpm=15000)
+    sizing = size_impeller(res.stage_results[0], res.refrigerant, Given(rpm=15000))
     assert sizing.rpm == pytest.approx(15000)
+
+
+def test_impeller_fixed_diameter_gives_rpm() -> None:
+    """외경을 고정하면 회전수가 따라 나온다."""
+    res = two_stage(base().at(t_subcond=None))
+    sizing = size_impeller(
+        res.stage_results[0], res.refrigerant, Given(diameter=0.170)
+    )
+    assert sizing.diameter_mm == pytest.approx(170.0)
+    omega = sizing.rpm * 2 * math.pi / 60
+    assert sizing.tip_speed == pytest.approx(omega * 0.170 / 2, rel=1e-9)
+
+
+def test_impeller_rpm_and_diameter_back_out_psi() -> None:
+    """회전수와 외경을 둘 다 주면 psi 가 역산된다."""
+    res = two_stage(base().at(t_subcond=None))
+    sizing = size_impeller(
+        res.stage_results[0], res.refrigerant, Given(rpm=16000, diameter=0.170)
+    )
+    u2 = 16000 * 2 * math.pi / 60 * 0.170 / 2
+    assert sizing.tip_speed == pytest.approx(u2, rel=1e-9)
+    assert sizing.head_coefficient == pytest.approx(
+        sizing.dh_isentropic * 1000 / u2**2, rel=1e-9
+    )
+
+
+def test_impeller_flags_impossible_head() -> None:
+    """너무 느리고 작은 임펠러면 헤드를 못 낸다고 알려줘야 한다."""
+    res = two_stage(base().at(t_subcond=None))
+    sizing = size_impeller(
+        res.stage_results[0], res.refrigerant, Given(rpm=6000, diameter=0.120)
+    )
+    assert sizing.head_coefficient > 0.7
+    assert any("헤드를 못 낸다" in w for w in sizing.warnings)
+
+
+def test_impeller_fixed_eye_gives_mach() -> None:
+    """흡입구 외경을 주면 축방향 마하수가 역산되고, 좁으면 경고가 뜬다."""
+    res = two_stage(base().at(t_subcond=None))
+    ok = size_impeller(res.stage_results[0], res.refrigerant, Given(eye_diameter=0.090))
+    assert ok.eye_diameter_mm == pytest.approx(90.0)
+    assert 0.2 < ok.eye_mach < 0.45
+
+    narrow = size_impeller(
+        res.stage_results[0], res.refrigerant, Given(eye_diameter=0.045)
+    )
+    assert narrow.eye_mach > 0.45
+    assert any("초킹" in w for w in narrow.warnings)
 
 
 def test_impeller_warns_outside_usual_range() -> None:
     """설계 범위를 벗어나면 경고가 붙는다."""
     res = two_stage(base().at(t_subcond=None))
-    sizing = size_impeller(res.stage_results[0], res.refrigerant, head_coefficient=0.20)
+    sizing = size_impeller(
+        res.stage_results[0], res.refrigerant, Given(head_coefficient=0.20)
+    )
     assert any("압력계수" in w for w in sizing.warnings)
+
+
+# --- 압축기 한 대 (단일축) ------------------------------------------------
+
+def test_single_shaft_uses_one_speed() -> None:
+    """단일축 직결이면 모든 단의 회전수가 같아야 한다.
+
+    단마다 최적 비속도를 따로 맞추면 단별 회전수가 달라지는데,
+    임펠러 두 개가 한 축에 붙어 있으면 그럴 수가 없다.
+    """
+    res = two_stage(base().at(t_subcond=None))
+    machine = size_machine(res)
+    assert machine.drive == "단일축 직결"
+    speeds = {round(z.rpm, 6) for z in machine.stages}
+    assert len(speeds) == 1, f"단별 회전수가 다르다: {speeds}"
+    assert machine.rpm == pytest.approx(machine.stages[0].rpm)
+
+
+def test_single_shaft_speed_follows_first_stage() -> None:
+    """회전수는 체적유량이 가장 큰 1단 기준으로 정해진다."""
+    res = two_stage(base().at(t_subcond=None))
+    machine = size_machine(res, Given(specific_speed=0.70))
+    assert machine.stages[0].specific_speed == pytest.approx(0.70, rel=1e-6)
+    # 뒷단은 유량이 적어 같은 회전수에서 비속도가 낮아진다
+    assert machine.stages[1].specific_speed < machine.stages[0].specific_speed
+
+
+def test_geared_allows_different_speeds() -> None:
+    """기어 내장형으로 두면 단별 회전수가 달라도 된다."""
+    res = two_stage(base().at(t_subcond=None))
+    machine = size_machine(res, geared=True)
+    assert machine.drive == "기어 내장형"
+    assert len({round(z.rpm) for z in machine.stages}) > 1
+
+
+def test_machine_fixed_rpm_applies_to_all_stages() -> None:
+    res = two_stage(base().at(t_subcond=None))
+    machine = size_machine(res, Given(rpm=14000))
+    assert all(z.rpm == pytest.approx(14000) for z in machine.stages)
+
+
+def test_machine_per_stage_diameters() -> None:
+    """단별 외경을 따로 줄 수 있다."""
+    res = two_stage(base().at(t_subcond=None))
+    machine = size_machine(res, Given(rpm=16000),
+                           stage_diameters=[0.170, 0.150])
+    assert machine.stages[0].diameter_mm == pytest.approx(170.0)
+    assert machine.stages[1].diameter_mm == pytest.approx(150.0)
+    assert all(z.rpm == pytest.approx(16000) for z in machine.stages)
+
+
+def test_single_stage_machine() -> None:
+    res = single_stage(base())
+    machine = size_machine(res)
+    assert len(machine.stages) == 1
 
 
 # --- IPLV ----------------------------------------------------------------

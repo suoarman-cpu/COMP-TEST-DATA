@@ -19,7 +19,8 @@ from turbochiller import (
     condenser_side,
     evaporator_side,
     iplv,
-    size_impeller,
+    Given,
+    size_machine,
     solve,
 )
 from turbochiller.plot import ph_diagram
@@ -92,8 +93,10 @@ def read_inputs() -> tuple[CycleInput, int, dict]:
         "hx": sb.checkbox("열교환기 2차측 (LMTD / UA)", value=True),
         "impeller": sb.checkbox("임펠러 개략 치수", value=True),
         "iplv": sb.checkbox("IPLV (부분부하 효율)", value=False),
-        "psi": sb.slider("임펠러 압력계수 ψ", 0.40, 0.75, 0.60, step=0.01),
-        "ns": sb.slider("임펠러 비속도 Ns", 0.40, 1.00, 0.70, step=0.01),
+        "psi": sb.number_input("압력계수 ψ (0이면 자동)", 0.0, 0.9, 0.0, step=0.01),
+        "rpm": sb.number_input("축 회전수 [rpm] (0이면 자동)", 0, 80000, 0, step=500),
+        "ns": sb.slider("목표 비속도 Ns", 0.40, 1.00, 0.70, step=0.01),
+        "geared": sb.checkbox("기어 내장형 (단별 회전수 다름)", value=False),
         "medium": sb.selectbox("IPLV 기준", ("air", "water"),
                                format_func=lambda m: "공랭" if m == "air" else "수냉"),
     }
@@ -272,29 +275,40 @@ def main() -> None:
             st.caption(
                 "무차원수로 잡은 1차 근사다. 깃 형상·확산기·CFD 로 다시 확인해야 한다."
             )
-            rows = []
-            warns: list[str] = []
-            for stage in res.stage_results:
-                sz = size_impeller(
-                    stage, inp.refrigerant,
-                    head_coefficient=opts["psi"], specific_speed=opts["ns"],
-                )
-                rows.append(
-                    {
-                        "단": sz.stage_name,
-                        "회전수 [rpm]": round(sz.rpm),
-                        "임펠러 외경 [mm]": round(sz.diameter_mm, 1),
-                        "선단 주속 [m/s]": round(sz.tip_speed, 1),
-                        "선단 마하수": round(sz.tip_mach, 3),
-                        "흡입구 외경 [mm]": round(sz.eye_diameter_mm, 1),
-                        "일계수 λ": round(sz.work_coefficient, 3),
-                        "유량계수 φ": round(sz.flow_coefficient, 4),
-                        "비직경 Ds": round(sz.specific_diameter, 3),
-                    }
-                )
-                warns += [f"{sz.stage_name}: {w}" for w in sz.warnings]
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-            for w in warns:
+            machine = size_machine(
+                res,
+                Given(
+                    head_coefficient=opts["psi"] or None,
+                    rpm=opts["rpm"] or None,
+                    specific_speed=opts["ns"],
+                ),
+                geared=opts["geared"],
+            )
+            st.info(
+                f"구동 방식 **{machine.drive}** · 축 회전수 **{machine.rpm:,.0f} rpm**"
+                + ("  (모든 단 공통)" if machine.drive == "단일축 직결" else "")
+            )
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "단": z.stage_name,
+                            "임펠러 외경 [mm]": round(z.diameter_mm, 1),
+                            "선단 주속 [m/s]": round(z.tip_speed, 1),
+                            "선단 마하수": round(z.tip_mach, 3),
+                            "흡입구 외경 [mm]": round(z.eye_diameter_mm, 1),
+                            "흡입구 마하수": round(z.eye_mach, 3),
+                            "압력계수 ψ": round(z.head_coefficient, 3),
+                            "비속도 Ns": round(z.specific_speed, 3),
+                            "유량계수 φ": round(z.flow_coefficient, 4),
+                        }
+                        for z in machine.stages
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+            for w in machine.warnings:
                 st.warning(w)
 
     with tabs[5]:

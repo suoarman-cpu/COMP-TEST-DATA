@@ -27,7 +27,7 @@ from typing import Any, Optional
 
 from .cycle import CycleInput, CycleResult, ExcelCompat, solve
 from .hx import condenser_side, evaporator_side
-from .impeller import size_impeller
+from .impeller import Given, size_machine
 from .standards import iplv
 from .svg import ph_diagram_svg
 
@@ -91,8 +91,22 @@ FIELDS: tuple[Field, ...] = (
           hint="비워두면 에너지 밸런스로 계산"),
 
     Field("t_cond_max", "최대 응축온도 [°C]", 70.0, step="1", group="기타"),
-    Field("psi", "임펠러 압력계수 ψ", 0.60, step="0.01", group="기타"),
-    Field("specific_speed", "임펠러 비속도 Ns", 0.70, step="0.01", group="기타"),
+
+    Field("rpm", "축 회전수 [rpm]", "", step="100", group="임펠러 (비우면 자동)",
+          hint="모터·인버터 회전수가 정해져 있을 때"),
+    Field("d2_mm", "1단 임펠러 외경 [mm]", "", step="1", group="임펠러 (비우면 자동)",
+          hint="기존 임펠러를 쓸 수 있는지 볼 때"),
+    Field("d2b_mm", "2단 임펠러 외경 [mm]", "", step="1", group="임펠러 (비우면 자동)"),
+    Field("deye_mm", "1단 흡입구 외경 [mm]", "", step="1", group="임펠러 (비우면 자동)",
+          hint="비우면 축방향 마하수 0.30 기준으로 계산"),
+    Field("psi", "압력계수 ψ", "", step="0.01", group="임펠러 (비우면 자동)",
+          hint="ψ·회전수·외경 중 둘만 정하면 나머지는 따라 나온다"),
+    Field("specific_speed", "목표 비속도 Ns", 0.70, step="0.01",
+          group="임펠러 (비우면 자동)",
+          hint="아무것도 안 정했을 때 회전수를 잡는 기준"),
+    Field("geared", "기어 내장형 (단별 회전수 다름)", False, "check",
+          group="임펠러 (비우면 자동)",
+          hint="끄면 단일축 직결 — 모든 단 회전수 같음"),
     Field("excel_compat", "엑셀 호환 모드", False, "check", group="기타",
           hint="원본 엑셀과 똑같이 계산"),
     Field("show_iplv", "IPLV 계산 (조금 느림)", False, "check", group="기타"),
@@ -395,33 +409,58 @@ def render_results(res: CycleResult, values: dict[str, Any]) -> str:
     out.append("</div>")
 
     # 임펠러
-    psi = float(values.get("psi") or 0.60)
-    ns = float(values.get("specific_speed") or 0.70)
-    sizings = [
-        size_impeller(st, inp.refrigerant, head_coefficient=psi, specific_speed=ns)
-        for st in res.stage_results
-    ]
+    def mm(key: str):
+        v = values.get(key, "")
+        return None if v == "" or v is None else float(v) / 1000.0
+
+    def opt(key: str):
+        v = values.get(key, "")
+        return None if v == "" or v is None else float(v)
+
     out.append('<div class="card"><h2>임펠러 개략 치수</h2>')
-    out.append(_table(
-        ["단", "회전수 [rpm]", "외경 [mm]", "주속 [m/s]", "마하수",
-         "흡입구 [mm]", "일계수 λ", "유량계수 φ"],
-        [
+    try:
+        machine = size_machine(
+            res,
+            Given(
+                head_coefficient=opt("psi"),
+                rpm=opt("rpm"),
+                diameter=mm("d2_mm"),
+                eye_diameter=mm("deye_mm"),
+                specific_speed=float(values.get("specific_speed") or 0.70),
+            ),
+            stage_diameters=[mm("d2_mm"), mm("d2b_mm")],
+            geared=bool(values.get("geared")),
+        )
+    except (ValueError, RuntimeError) as exc:
+        out.append(f'<div class="msg err">임펠러 계산 실패: {esc(exc)}</div></div>')
+    else:
+        out.append(
+            f'<p class="note" style="margin:0 0 10px">구동 방식 <b>{esc(machine.drive)}</b>'
+            f' &nbsp;·&nbsp; 축 회전수 <b>{machine.rpm:,.0f} rpm</b>'
+            + ("  (모든 단 공통)" if machine.drive == "단일축 직결" else "")
+            + "</p>"
+        )
+        out.append(_table(
+            ["단", "외경 [mm]", "주속 [m/s]", "선단 마하수", "흡입구 [mm]",
+             "흡입구 마하수", "흡입체적 [m³/h]", "ψ", "Ns", "φ"],
             [
-                z.stage_name, f"{z.rpm:,.0f}", f"{z.diameter_mm:.1f}",
-                f"{z.tip_speed:.1f}", f"{z.tip_mach:.3f}",
-                f"{z.eye_diameter_mm:.1f}", f"{z.work_coefficient:.3f}",
-                f"{z.flow_coefficient:.4f}",
-            ]
-            for z in sizings
-        ],
-    ))
-    for z in sizings:
-        for w in z.warnings:
-            out.append(f'<div class="msg warn">{esc(z.stage_name)}: {esc(w)}</div>')
-    out.append(
-        '<p class="note">무차원수로 잡은 1차 근사입니다. '
-        "실제 설계는 깃 형상·확산기·CFD 로 다시 확인해야 합니다.</p></div>"
-    )
+                [
+                    z.stage_name, f"{z.diameter_mm:.1f}", f"{z.tip_speed:.1f}",
+                    f"{z.tip_mach:.3f}", f"{z.eye_diameter_mm:.1f}",
+                    f"{z.eye_mach:.3f}", f"{z.volume_flow * 3600:.0f}",
+                    f"{z.head_coefficient:.3f}", f"{z.specific_speed:.3f}",
+                    f"{z.flow_coefficient:.4f}",
+                ]
+                for z in machine.stages
+            ],
+        ))
+        for w in machine.warnings:
+            out.append(f'<div class="msg warn">{esc(w)}</div>')
+        out.append(
+            '<p class="note">무차원수로 잡은 1차 근사입니다. '
+            "실제 설계는 깃 형상·확산기·CFD 로 다시 확인해야 합니다.</p>"
+        )
+        out.append("</div>")
 
     # IPLV
     if values.get("show_iplv"):
