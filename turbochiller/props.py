@@ -144,3 +144,33 @@ def molar_mass(fluid: str) -> float:
     from CoolProp.CoolProp import PropsSI as _P
 
     return _P("M", "", 0, "", 0, normalize(fluid)) * 1000.0
+
+
+def h_dp(fluid: str, density: float, p_kpa: float) -> float:
+    """엔탈피 [kJ/kg] (밀도, P 기준). 등비체적선을 그릴 때 쓴다."""
+    return _props("H", "D", density, "P", p_kpa * 1000.0, fluid) / 1000.0
+
+
+def t_dp(fluid: str, density: float, p_kpa: float) -> float:
+    """온도 [°C] (밀도, P 기준)."""
+    return _props("T", "D", density, "P", p_kpa * 1000.0, fluid) - T0
+
+
+def s_hp(fluid: str, h: float, p_kpa: float) -> float:
+    """엔트로피 [kJ/kg·K] (h, P 기준)."""
+    return _props("S", "H", h * 1000.0, "P", p_kpa * 1000.0, fluid) / 1000.0
+
+
+def q_sp(fluid: str, s: float, p_kpa: float) -> float:
+    """건도 [-] (s, P 기준). 2상 영역이 아니면 -1 또는 범위 밖 값이 나온다."""
+    return _props("Q", "S", s * 1000.0, "P", p_kpa * 1000.0, fluid)
+
+
+def q_dp(fluid: str, density: float, p_kpa: float) -> float:
+    """건도 [-] (밀도, P 기준)."""
+    return _props("Q", "D", density, "P", p_kpa * 1000.0, fluid)
+
+
+def in_two_phase(q: float) -> bool:
+    """CoolProp 이 돌려준 건도가 2상 영역을 뜻하는지."""
+    return 0.0 <= q <= 1.0

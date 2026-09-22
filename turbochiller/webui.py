@@ -11,9 +11,15 @@ streamlit / pandas / pyarrow 가 필요 없다.
 from __future__ import annotations
 
 import html as html_mod
+import os
 import socket
+import subprocess
+import sys
 import threading
+import time
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +30,12 @@ from .hx import condenser_side, evaporator_side
 from .impeller import size_impeller
 from .standards import iplv
 from .svg import ph_diagram_svg
+
+#: 이미 떠 있는 프로그램을 찾을 때 뒤져볼 포트 범위
+PORT_RANGE = range(8765, 8785)
+
+#: /ping 이 돌려주는 표시. 우리 프로그램인지 확인하는 용도.
+PING_TOKEN = "turbochiller-ok"
 
 REFRIGERANTS = [
     "R1234ze(E)",
@@ -222,6 +234,14 @@ tbody tr:last-child td{border-bottom:0}
   .msg.warn{background:#38230f;color:#ffca92;border-color:#5b3a1a}
 }
 .note{color:var(--ink3);font-size:12px;margin-top:8px}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.quit{flex:0 0 auto;padding:7px 15px;border:1px solid var(--line);border-radius:8px;
+  background:var(--panel);color:var(--ink2);text-decoration:none;font-size:13px;
+  font-weight:600;white-space:nowrap}
+.quit:hover{border-color:var(--warn);color:var(--warn)}
+.bye{max-width:520px;margin:12vh auto;text-align:center;padding:26px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.bye h1{font-size:19px;margin-bottom:8px}
 @media (max-width:900px){
   .wrap{flex-direction:column}
   aside{position:static;flex:1 1 auto;width:100%}
@@ -454,9 +474,13 @@ def render_page(query: dict[str, list[str]]) -> str:
 <div class="wrap">
   <aside><div class="card">{render_form(values)}</div></aside>
   <main>
-    <h1>터보 냉동기 사이클 해석</h1>
-    <p class="sub">왼쪽 값을 고치고 '다시 계산'을 누르세요.
-      끝내려면 검은 창에서 Ctrl+C 를 누릅니다.</p>
+    <div class="head">
+      <div>
+        <h1>터보 냉동기 사이클 해석</h1>
+        <p class="sub">왼쪽 값을 고치고 '다시 계산'을 누르세요.</p>
+      </div>
+      <a class="quit" href="/quit" title="프로그램을 완전히 끝냅니다">종료</a>
+    </div>
     {body}
   </main>
 </div>
@@ -467,14 +491,37 @@ def render_page(query: dict[str, list[str]]) -> str:
 # 서버
 # ---------------------------------------------------------------------------
 
+BYE_PAGE = f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>종료했습니다</title><style>{STYLE}</style></head>
+<body><div class="bye">
+  <h1>프로그램을 종료했습니다</h1>
+  <p class="sub">이 탭은 닫으셔도 됩니다.<br>
+     다시 쓰시려면 실행 파일을 두 번 누르세요.</p>
+</div></body></html>"""
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "turbochiller"
 
     def do_GET(self) -> None:  # noqa: N802  (내장 클래스가 정한 이름)
         parsed = urllib.parse.urlparse(self.path)
+
         if parsed.path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
+            return
+
+        # 이미 떠 있는 우리 프로그램인지 확인하는 용도
+        if parsed.path == "/ping":
+            self._send(PING_TOKEN.encode(), "text/plain; charset=utf-8")
+            return
+
+        if parsed.path == "/quit":
+            self._send(BYE_PAGE.encode("utf-8"))
+            # 응답을 보낸 뒤에 서버를 내린다
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
 
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
@@ -482,49 +529,109 @@ class _Handler(BaseHTTPRequestHandler):
             page = render_page(query)
         except Exception as exc:  # 어떤 오류든 화면에 보여준다
             page = (
-                "<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif'>"
-                f"<h2>오류가 났습니다</h2><pre>{html_mod.escape(repr(exc))}</pre></body>"
+                "<!doctype html><meta charset='utf-8'>"
+                "<body style='font-family:sans-serif;padding:24px'>"
+                f"<h2>오류가 났습니다</h2><pre>{html_mod.escape(repr(exc))}</pre>"
+                "</body>"
             )
-        data = page.encode("utf-8")
+        self._send(page.encode("utf-8"))
+
+    def _send(self, data: bytes, content_type: str = "text/html; charset=utf-8") -> None:
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass   # 브라우저가 먼저 닫은 경우
 
     def log_message(self, *args) -> None:
-        """요청 로그는 찍지 않는다 (검은 창을 깨끗하게)."""
+        """요청 로그는 찍지 않는다 (창을 깨끗하게)."""
 
 
-def _free_port(preferred: int = 8765) -> int:
+# ---------------------------------------------------------------------------
+# 포트 찾기 / 이미 떠 있는지 확인
+# ---------------------------------------------------------------------------
+
+def _port_free(port: int) -> bool:
+    with socket.socket() as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def free_port(preferred: int = 8765) -> int:
     """쓸 수 있는 포트를 고른다."""
     for port in range(preferred, preferred + 20):
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        if _port_free(port):
+            return port
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
-def serve(port: Optional[int] = None, open_browser: bool = True) -> None:
-    """웹 화면을 띄운다. Ctrl+C 로 끝낸다."""
-    port = port or _free_port()
+def find_running(timeout: float = 0.3) -> Optional[int]:
+    """이미 떠 있는 이 프로그램을 찾는다. 있으면 그 포트를 돌려준다.
+
+    실행 파일을 여러 번 눌러도 프로그램이 쌓이지 않게 하려는 것이다.
+    """
+    for port in PORT_RANGE:
+        if _port_free(port):
+            continue          # 아무도 안 쓰는 포트
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/ping", timeout=timeout
+            ) as resp:
+                if resp.read().decode().strip() == PING_TOKEN:
+                    return port
+        except (urllib.error.URLError, OSError, ValueError):
+            continue          # 다른 프로그램이 쓰는 포트
+    return None
+
+
+def _wait_until_up(port: int, timeout: float = 25.0) -> bool:
+    """서버가 응답할 때까지 기다린다."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/ping", timeout=0.5
+            ) as resp:
+                if resp.read().decode().strip() == PING_TOKEN:
+                    return True
+        except (urllib.error.URLError, OSError, ValueError):
+            time.sleep(0.25)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# 서버 실행
+# ---------------------------------------------------------------------------
+
+def serve(
+    port: Optional[int] = None,
+    open_browser: bool = True,
+    host: str = "127.0.0.1",
+    quiet: bool = False,
+) -> None:
+    """이 프로세스에서 웹 화면을 돌린다. Ctrl+C 로 끝낸다."""
+    port = port or free_port()
     url = f"http://127.0.0.1:{port}/"
-    server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    server = ThreadingHTTPServer((host, port), _Handler)
 
-    print("=" * 46)
-    print("  터보 냉동기 사이클 해석")
-    print("=" * 46)
-    print()
-    print(f"  브라우저에서 열렸습니다: {url}")
-    print("  (자동으로 안 열리면 위 주소를 직접 입력하세요)")
-    print()
-    print("  끝내려면 이 창에서 Ctrl+C 를 누르세요.")
-    print()
+    if not quiet:
+        print("=" * 46)
+        print("  터보 냉동기 사이클 해석")
+        print("=" * 46)
+        print()
+        print(f"  브라우저에서 열렸습니다: {url}")
+        print()
+        print("  끝내려면 이 창에서 Ctrl+C 를 누르거나,")
+        print("  브라우저 오른쪽 위의 '종료' 를 누르세요.")
+        print()
 
     if open_browser:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()
@@ -532,10 +639,132 @@ def serve(port: Optional[int] = None, open_browser: bool = True) -> None:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n종료합니다.")
+        if not quiet:
+            print("\n종료합니다.")
     finally:
         server.server_close()
 
 
+def _spawn_detached(port: int) -> bool:
+    """창 없이 백그라운드로 서버를 띄운다. 성공하면 True.
+
+    윈도우에서는 pythonw.exe 를 써서 검은 창이 아예 뜨지 않게 한다.
+    """
+    base = _relaunch_command()
+    if base is None:
+        return False
+    args = base + ["--serve", "--port", str(port), "--no-browser"]
+    log_path = os.path.join(_app_dir(), "실행오류.log")
+
+    kwargs: dict = {}
+    if os.name == "nt":
+        # CREATE_NO_WINDOW(0x08000000) + DETACHED_PROCESS(0x00000008)
+        kwargs["creationflags"] = 0x08000000 | 0x00000008
+    else:
+        kwargs["start_new_session"] = True
+
+    try:
+        log = open(log_path, "w", encoding="utf-8")
+        subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                         **kwargs)
+    except Exception:
+        return False
+    return _wait_until_up(port)
+
+
+def _app_dir() -> str:
+    """오류 기록을 남길 폴더."""
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    if script and os.path.isfile(script):
+        return os.path.dirname(script) or "."
+    return os.getcwd()
+
+
+def _relaunch_command() -> Optional[list[str]]:
+    """자기 자신을 다시 띄우는 명령을 만든다.
+
+    한 파일로 합친 배포판이면 그 파일을 직접 실행하고,
+    패키지로 설치돼 있으면 `-m turbochiller.webui` 로 실행한다.
+    """
+    python = _background_python()
+    package = globals().get("__package__") or ""
+    if package:
+        return [python, "-m", "turbochiller.webui"]
+
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    if script and os.path.isfile(script):
+        return [python, script]
+    return None
+
+
+def _background_python() -> str:
+    """창 없이 돌릴 파이썬 실행 파일 경로."""
+    exe = sys.executable
+    if os.name == "nt":
+        candidate = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return exe
+
+
+def run(port: Optional[int] = None, background: bool = True) -> None:
+    """실행 파일에서 부르는 진입점.
+
+    background=True 면 창을 남기지 않고 백그라운드로 띄운 뒤 바로 빠져나온다.
+    (검은 창을 계속 켜두지 않아도 되게 하려는 것이다)
+    """
+    existing = find_running()
+    if existing is not None:
+        url = f"http://127.0.0.1:{existing}/"
+        print(f"이미 실행 중입니다. 브라우저를 엽니다: {url}")
+        webbrowser.open(url)
+        return
+
+    port = port or free_port()
+
+    if background and _spawn_detached(port):
+        url = f"http://127.0.0.1:{port}/"
+        webbrowser.open(url)
+        print("=" * 52)
+        print("  터보 냉동기 사이클 해석 — 실행했습니다")
+        print("=" * 52)
+        print()
+        print(f"  주소 : {url}")
+        print()
+        print("  이 창은 닫으셔도 됩니다. 프로그램은 계속 돌아갑니다.")
+        print("  끝내실 때는 브라우저 오른쪽 위의 '종료' 를 누르세요.")
+        print()
+        return
+
+    # 백그라운드 실행이 안 되면 이 창에서 그대로 돌린다
+    if background:
+        print("(백그라운드 실행에 실패해 이 창에서 직접 실행합니다)")
+        print()
+    serve(port=port, open_browser=True)
+
+
+def _cli(argv: Optional[list[str]] = None) -> None:
+    """명령줄에서 부를 때."""
+    import argparse as _argparse
+
+    parser = _argparse.ArgumentParser(description="터보 냉동기 사이클 해석 — 웹 화면")
+    parser.add_argument(
+        "--serve", action="store_true",
+        help="이 창에서 서버를 직접 돌린다 (백그라운드로 띄운 쪽이 쓰는 옵션)",
+    )
+    parser.add_argument("--port", type=int, help="포트 (기본: 8765부터 빈 곳)")
+    parser.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않는다")
+    parser.add_argument(
+        "--console", action="store_true",
+        help="백그라운드로 보내지 않고 이 창에서 실행한다",
+    )
+    args = parser.parse_args(argv)
+
+    if args.serve:
+        serve(port=args.port, open_browser=not args.no_browser, quiet=True)
+    else:
+        run(port=args.port, background=not args.console)
+
+
 if __name__ == "__main__":
-    serve()
+    _cli()
