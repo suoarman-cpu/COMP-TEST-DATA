@@ -247,10 +247,28 @@ tbody tr:last-child td{border-bottom:0}
 .bye{max-width:520px;margin:12vh auto;text-align:center;padding:26px;
   background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .bye h1{font-size:19px;margin-bottom:8px}
+/* --- 폰 화면 --- */
 @media (max-width:900px){
-  .wrap{flex-direction:column}
-  aside{position:static;flex:1 1 auto;width:100%}
+  /* 결과를 먼저 보여준다. 입력칸이 20개라 그게 먼저 나오면
+     결과까지 한참 스크롤해야 한다. */
+  .wrap{flex-direction:column;padding:12px 12px 72px}
+  aside{position:static;flex:1 1 auto;width:100%;order:2}
+  main{order:1;width:100%}
+  h1{font-size:19px}
+  .metric .v{font-size:22px}
+  .card{padding:13px}
+  /* 표가 화면보다 넓으면 카드 안에서만 옆으로 넘긴다.
+     페이지 전체가 가로로 밀리지 않게 한다. */
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .scroll table{min-width:520px}
+  .grid2{grid-template-columns:1fr}
+  /* 입력칸으로 바로 내려가는 단추 */
+  .jump{position:fixed;right:14px;bottom:14px;z-index:9;
+        padding:12px 18px;border-radius:999px;background:var(--accent);
+        color:#fff;text-decoration:none;font-size:14px;font-weight:700;
+        box-shadow:0 3px 12px rgba(0,0,0,.28)}
 }
+@media (min-width:901px){ .jump{display:none} }
 """
 
 
@@ -307,7 +325,10 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
     body = "".join(
         "<tr>" + "".join(f"<td>{esc(c)}</td>" for c in r) + "</tr>" for r in rows
     )
-    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+    return (
+        f'<div class="scroll"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div>"
+    )
 
 
 def render_results(res: CycleResult, values: dict[str, Any]) -> str:
@@ -523,7 +544,7 @@ def _retrofit_section(res: CycleResult, inp: CycleInput, values: dict) -> str:
     return "".join(out)
 
 
-def render_page(query: dict[str, list[str]]) -> str:
+def render_page(query: dict[str, list[str]], hosted: bool = False) -> str:
     values = parse_query(query)
     try:
         inp, stages = build_input(values)
@@ -534,6 +555,15 @@ def render_page(query: dict[str, list[str]]) -> str:
             f'<div class="msg err"><b>계산할 수 없는 조건입니다.</b><br>{esc(exc)}</div>'
         )
 
+    # 인터넷에 올린 경우에는 '종료' 를 빼둔다.
+    # 누구든 눌러 서버를 내릴 수 있으면 안 된다.
+    quit_button = (
+        "" if hosted
+        else '<a class="quit" href="/quit" title="프로그램을 완전히 끝냅니다">종료</a>'
+    )
+    # 폰에서는 입력칸이 결과 아래로 내려가므로 '왼쪽' 이라고 하면 안 맞는다
+    hint = "값을 고치고 '다시 계산'을 누르세요. (폰에서는 아래쪽에 입력칸이 있습니다)"
+
     return f"""<!doctype html>
 <html lang="ko"><head>
 <meta charset="utf-8">
@@ -542,18 +572,19 @@ def render_page(query: dict[str, list[str]]) -> str:
 <style>{STYLE}</style>
 </head><body>
 <div class="wrap">
-  <aside><div class="card">{render_form(values)}</div></aside>
+  <aside id="inputs"><div class="card">{render_form(values)}</div></aside>
   <main>
     <div class="head">
       <div>
         <h1>터보 냉동기 사이클 해석</h1>
-        <p class="sub">왼쪽 값을 고치고 '다시 계산'을 누르세요.</p>
+        <p class="sub">{hint}</p>
       </div>
-      <a class="quit" href="/quit" title="프로그램을 완전히 끝냅니다">종료</a>
+      {quit_button}
     </div>
     {body}
   </main>
 </div>
+<a class="jump" href="#inputs">입력값 고치기 ↓</a>
 </body></html>"""
 
 

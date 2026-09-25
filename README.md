@@ -18,6 +18,23 @@
 
 ---
 
+## 폰에서 쓰려면
+
+인터넷에 올려두면 PC를 켜두지 않아도 폰 브라우저로 쓸 수 있다.
+비밀번호가 걸리고, 폰 화면에 맞게 결과가 먼저 나온다.
+
+→ [`docs/인터넷에_올리기.md`](docs/인터넷에_올리기.md)
+
+```bash
+# 내 PC 에서 먼저 시험해보기
+pip install -r requirements-web.txt
+TURBOCHILLER_PASSWORD=시험용비번 python -m turbochiller.wsgi
+```
+
+> 설계 조건이 외부 서버로 나간다. 사내 규정을 먼저 확인할 것.
+
+---
+
 ## 0. 제일 쉬운 방법 — 파일 2개만 받기
 
 폴더 구조도 압축도 필요 없다. `dist/` 폴더의 **파일 2개**를 같은 폴더에 두면 끝이다.
@@ -265,6 +282,7 @@ pytest
 - `tests/test_webui.py` — 내장 화면·SVG, 그리고 배포판에 무거운 라이브러리가
   섞이지 않았는지
 - `tests/test_retrofit.py` — 냉매 교체 검토 (설계점 재현, 능력비, 헤드 부족 감지)
+- `tests/test_wsgi.py` — 인터넷에 올렸을 때 막아야 할 것을 막는지
 
 ---
 
@@ -277,6 +295,7 @@ turbochiller/
   hx.py          열교환기 2차측 LMTD / UA
   standards.py   AHRI 550/590 조건표, IPLV
   retrofit.py    냉매 교체 검토 (같은 압축기)
+  wsgi.py        인터넷에 올릴 때 쓰는 앱 (비밀번호 + 표준 서버)
   svg.py         P-h 선도 (내장 기능만, 라이브러리 불필요)
   plot.py        P-h 선도 (matplotlib 판)
   webui.py       웹 화면 (내장 기능만)   ← 배포판이 쓰는 화면

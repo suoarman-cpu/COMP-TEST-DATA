@@ -1,0 +1,21 @@
+# Render(render.com) 에 올릴 때 쓰는 설정.
+# 저장소를 연결하면 이 파일을 읽어 알아서 띄운다.
+#
+# 올린 뒤에 반드시 할 일:
+#   Render 대시보드 > Environment 에서 TURBOCHILLER_PASSWORD 를 정한다.
+#   정하지 않으면 계산이 막힌 안내 화면만 나온다 (일부러 그렇게 해 두었다).
+services:
+  - type: web
+    name: turbochiller
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: gunicorn turbochiller.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: TURBOCHILLER_USER
+        value: turbo
+      - key: TURBOCHILLER_PASSWORD
+        sync: false          # 대시보드에서 직접 입력한다 (파일에 남기지 않는다)
