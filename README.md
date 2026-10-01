@@ -303,6 +303,7 @@ turbochiller/
   config.py      입력 파일 읽기/쓰기
   cli.py         명령줄 실행기
 app.py           웹 화면 (streamlit 판)
+excel/           엑셀 계산서 생성기 (애드인 없이 혼자 도는 판)
 tools/           배포용 단일 파일 빌드
 dist/            배포판 (파일 2개)
 examples/        입력 파일 예시 3개 (엑셀 시트 3개에 대응)
@@ -316,6 +317,22 @@ docs/            모델 설명
 CoolProp 이 아는 냉매는 모두 쓸 수 있다.
 
 ---
+
+## 6-2. 엑셀로 쓰고 싶을 때
+
+파이썬을 깔 수 없는 PC·폰에서도 쓸 수 있게, **엑셀 파일 한 개**로도 만들어 두었다.
+물성표를 시트에 심어 두었으므로 REFPROP·CoolProp **애드인이 필요 없다**.
+
+```bash
+python -m excel.make_all      # excel/출력/터보냉동기_사이클계산.xlsx
+```
+
+- 냉매 4종(R1234ze(E)·R134a·R1234yf·R513A)이 한 파일에 들어 있고 **B4 에서 고른다**
+- `[계산]` 시트의 **파란 칸만** 고치면 된다
+- **P-h 선도**가 시트 안에 그려진다 (냉매를 바꾸면 따라 바뀐다)
+- 최종 COP·축동력이 이 프로그램과 **0.13% 안**에서 맞는다 (`tests/test_excel.py` 가 LibreOffice 로 실제 계산시켜 대조한다)
+
+자세한 내용은 [`excel/README.md`](excel/README.md).
 
 ## 7. 범위
 

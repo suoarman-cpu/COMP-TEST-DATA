@@ -125,3 +125,17 @@ def build(
         s=s_grid,
         rho=r_grid,
     )
+
+
+def build_many(refrigerants: list[str], **kwargs) -> list[PropertyTables]:
+    """여러 냉매의 표를 만든다.
+
+    한 파일에 담아 냉매를 고르게 하려면 '과열도 행' 이 모든 냉매에서
+    같아야 한다 (행을 공유하고 열만 옮겨 쓰기 때문이다).
+    build() 가 같은 설정을 쓰므로 자동으로 맞지만, 그래도 확인한다.
+    """
+    built = [build(r, **kwargs) for r in refrigerants]
+    rows = {tuple(t.superheats) for t in built}
+    if len(rows) != 1:
+        raise ValueError("냉매마다 과열도 행이 달라 한 파일에 담을 수 없다")
+    return built
