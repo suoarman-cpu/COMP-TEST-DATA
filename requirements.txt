@@ -1,6 +1,10 @@
 # --- 꼭 필요한 것 (이것 하나면 배포판이 돌아간다) ---
 CoolProp>=6.4          # 냉매 물성 (엑셀의 REFPROP/CoolProp 애드인 대체)
 
+# 인터넷에 올릴 때 (호스팅 업체가 requirements.txt 를 기본으로 읽는 경우가
+# 많아서, 여기에도 넣어 둔다. 가볍게 올리려면 requirements-web.txt 를 쓸 것)
+gunicorn>=21.0
+
 # --- 아래는 있으면 좋지만 없어도 되는 것들 ---
 # streamlit 화면을 쓸 때. pyarrow 를 끌고 오므로 32비트/ARM 윈도우에서는
 # 설치가 안 될 수 있다. 그런 PC 는 `python -m turbochiller.webui` 를 쓰면 된다.

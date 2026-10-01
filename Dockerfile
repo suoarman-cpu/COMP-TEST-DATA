@@ -15,4 +15,4 @@ EXPOSE 8000
 # TURBOCHILLER_PASSWORD 는 이미지에 넣지 않는다.
 # 실행할 때 환경변수로 준다.
 CMD exec gunicorn turbochiller.wsgi:application \
-    --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    --bind 0.0.0.0:$PORT --timeout 120
