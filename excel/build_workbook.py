@@ -157,11 +157,12 @@ def write_tables(wb: Workbook, tabs: list[PropertyTables]) -> dict:
 # 계산 시트에 두고(SAT_START/SAT_END/COL_OFF/N_COLS), 아래 수식들이 그걸
 # 참조한다. 시트 이름을 바꿔 끼우는 INDIRECT 보다 빠르고 덜 깨진다.
 
-#: 선택된 냉매의 표 위치가 들어 있는 칸 (계산 시트)
-SAT_START = f"'{S_CALC}'!$G$5"
-SAT_END = f"'{S_CALC}'!$G$6"
-COL_OFF = f"'{S_CALC}'!$G$7"
-N_COLS = f"'{S_CALC}'!$G$8"
+#: 선택된 냉매의 표 위치가 들어 있는 칸 (계산 시트).
+#: P-h 선도가 F 열부터 앉으므로, 겹치지 않게 멀리 R 열로 빼 두었다.
+SAT_START = f"'{S_CALC}'!$R$5"
+SAT_END = f"'{S_CALC}'!$R$6"
+COL_OFF = f"'{S_CALC}'!$R$7"
+N_COLS = f"'{S_CALC}'!$R$8"
 
 
 def sat_col(column: int) -> str:
@@ -483,13 +484,13 @@ def write_calc(ws, lk: "Lookup", tabs: list[PropertyTables], layout: dict) -> No
 
     # 고른 냉매의 표 위치 (수식이 참조한다. 보기엔 거추장스러워 옆으로 뺐다)
     conf_n = layout["_conf_rows"]
-    _put(ws, "F4", "표 위치 (자동)", NOTE)
+    _put(ws, "Q4", "표 위치 (자동)", NOTE)
     for i, (label, col) in enumerate(
             [("포화 시작행", 2), ("포화 끝행", 3), ("과열 열오프셋", 4),
              ("과열 열수", 5)]):
         r = 5 + i
-        _put(ws, f"F{r}", label, NOTE)
-        _put(ws, f"G{r}",
+        _put(ws, f"Q{r}", label, NOTE)
+        _put(ws, f"R{r}",
              f"=INDEX('{S_CONF}'!${get_column_letter(col)}$4:"
              f"${get_column_letter(col)}${3 + conf_n},"
              f"MATCH($B$4,'{S_CONF}'!$A$4:$A${3 + conf_n},0))", NOTE)
@@ -679,7 +680,7 @@ def write_chart_data(wb: Workbook, tabs: list[PropertyTables], layout: dict):
         cell.font = Font(name=FONT, size=9, bold=True)
         ws.column_dimensions[get_column_letter(c)].width = 12
 
-    start = f"'{S_CALC}'!$G$5"
+    start = SAT_START
     n_points = chart_points(tabs)
     for i in range(n_points):
         r = 4 + i
@@ -717,10 +718,18 @@ def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
     chart.x_axis.title = "엔탈피 h [kJ/kg]"
     chart.y_axis.title = "압력 P [kPa]"
     chart.y_axis.scaling.logBase = 10          # 압력축은 로그로 본다
-    chart.height = 11
-    chart.width = 17
+    chart.height = 10
+    chart.width = 15
     chart.x_axis.delete = False
     chart.y_axis.delete = False
+    # openpyxl 은 두 축 모두 'l'(왼쪽) 로 내놓는다. 가로축은 아래가 맞다.
+    chart.x_axis.axPos = "b"
+    # 눈금 숫자는 정수로. 안 그러면 '100.000' 처럼 길어져 비스듬히 눕는다.
+    chart.x_axis.numFmt = "0"
+    chart.y_axis.numFmt = "0"
+    # 포화선 데이터는 숨긴 시트에 있다. 이 값이 참이면 엑셀이 숨은 칸을
+    # 빼고 그려서 선이 통째로 사라진다.
+    chart.visible_cells_only = False
 
 
     def line(x_col: int, y_col: int, rows: int, title: str, color: str,
@@ -739,7 +748,8 @@ def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
     chart.series.append(line(4, 5, n_points, "포화증기선", "6F6E68", 14000, False))
     chart.series.append(line(7, 8, n_cycle, "사이클", "2A78D6", 22000, True))
 
-    calc_ws.add_chart(chart, "F16")
+    # 결과 바로 옆에 붙인다. 입력칸(B~D)을 가리지 않으면서 한 화면에 들어온다.
+    calc_ws.add_chart(chart, "F6")
 
 
 def build_workbook(tabs: list[PropertyTables], path: str) -> str:
@@ -755,7 +765,7 @@ def build_workbook(tabs: list[PropertyTables], path: str) -> str:
     add_ph_chart(calc, n_cycle, n_points)
     calc.sheet_view.showGridLines = False
     # 인쇄 범위를 안 잡으면 빈 칸까지 끌고 가 수십 장이 나온다.
-    calc.print_area = "A1:H80"
+    calc.print_area = "A1:N80"
     calc.sheet_properties.pageSetUpPr.fitToPage = True
     calc.page_setup.fitToWidth = 1
     calc.page_setup.fitToHeight = 0
