@@ -16,13 +16,25 @@ from __future__ import annotations
 
 from openpyxl import Workbook
 from openpyxl.chart import Reference, ScatterChart, Series
+from openpyxl.chart.axis import ChartLines as Gridlines
 from openpyxl.chart.marker import Marker
+from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.drawing.line import LineProperties
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
+from .chartlines import ISOTHERMS, N_POINTS, QUALITIES, ChartLines
 from .tables import PropertyTables
+from .version import CHANGELOG, REVISION, revision_label
+
+#: 선도에 그릴 곡선의 이름 — chartlines.build 가 내놓는 순서 그대로다.
+CHART_CURVES = (["포화선"]
+                + [f"{t:g}°C" for t in ISOTHERMS]
+                + [f"x={x:g}" for x in QUALITIES])
+
+#: 같은 순서로 선 종류 (색·굵기를 정하는 데 쓴다)
+CHART_KINDS = ["돔"] + ["등온"] * len(ISOTHERMS) + ["건도"] * len(QUALITIES)
 
 FONT = "맑은 고딕"          # 전부 한글이라 한글 전용 서체를 쓴다
 
@@ -38,6 +50,7 @@ BOX = Border(*[Side(style="thin", color="D0D0D0")] * 4)
 
 # 시트 이름
 S_CALC, S_LOOK, S_CONF = "계산", "조회", "설정"
+S_LINES = "선도데이터"
 S_SAT, S_H, S_S, S_D = "물성_포화", "물성_h", "물성_s", "물성_밀도"
 
 #: 과열표가 시작하는 행/열 (1행 = 압력 머리글, A열 = 과열도)
@@ -132,7 +145,7 @@ def write_tables(wb: Workbook, tabs: list[PropertyTables]) -> dict:
     conf["A2"] = "계산 시트에서 냉매를 고르면 여기서 위치를 찾아 쓴다 — 고치지 말 것."
     conf["A2"].font = NOTE
     for c, h in enumerate(["냉매", "포화 시작행", "포화 끝행", "과열 열오프셋",
-                           "과열 열수"], start=1):
+                           "과열 열수", "선도 열오프셋"], start=1):
         cell = conf.cell(row=3, column=c, value=h)
         cell.font = HEAD
         cell.fill = HEAD_FILL
@@ -140,7 +153,8 @@ def write_tables(wb: Workbook, tabs: list[PropertyTables]) -> dict:
     for i, t in enumerate(tabs):
         info = layout[t.refrigerant]
         for c, v in enumerate([t.refrigerant, info["sat_start"], info["sat_end"],
-                               info["col_offset"], info["n_cols"]], start=1):
+                               info["col_offset"], info["n_cols"],
+                               i * LINE_COLS], start=1):
             conf.cell(row=4 + i, column=c, value=v).font = BLACK
     layout["_conf_rows"] = len(tabs)
     layout["_n_sh"] = len(tabs[0].superheats)
@@ -163,6 +177,7 @@ SAT_START = f"'{S_CALC}'!$R$5"
 SAT_END = f"'{S_CALC}'!$R$6"
 COL_OFF = f"'{S_CALC}'!$R$7"
 N_COLS = f"'{S_CALC}'!$R$8"
+LINE_OFF = f"'{S_CALC}'!$R$9"
 
 
 def sat_col(column: int) -> str:
@@ -471,6 +486,11 @@ def write_calc(ws, lk: "Lookup", tabs: list[PropertyTables], layout: dict) -> No
     ws["A1"].font = Font(name=FONT, size=16, bold=True)
     ws["A2"] = "2단 압축 + 이코노마이저 ·  파란 칸만 고치면 됩니다"
     ws["A2"].font = Font(name=FONT, size=10, color="808080")
+    # 리비전은 눈에 띄는 자리에 찍는다. 파일 이름이 비슷해서 옛 판을
+    # 열어 놓고 새 판인 줄 아는 일이 실제로 있었다.
+    _put(ws, "D1", revision_label(),
+         Font(name=FONT, size=11, bold=True, color="1F3864"))
+    _put(ws, "D2", next(c for n, _, c in CHANGELOG if n == REVISION), NOTE)
     ws.column_dimensions["A"].width = 22
     # D 는 설명 글과 상태점 표의 '압력' 을 겸한다. E/F 는 엔탈피·밀도라
     # 숫자가 들어갈 만큼 넓혀야 한다 (좁으면 ### 으로 깨진다).
@@ -493,7 +513,7 @@ def write_calc(ws, lk: "Lookup", tabs: list[PropertyTables], layout: dict) -> No
     _put(ws, "Q4", "표 위치 (자동)", NOTE)
     for i, (label, col) in enumerate(
             [("포화 시작행", 2), ("포화 끝행", 3), ("과열 열오프셋", 4),
-             ("과열 열수", 5)]):
+             ("과열 열수", 5), ("선도 열오프셋", 6)]):
         r = 5 + i
         _put(ws, f"Q{r}", label, NOTE)
         _put(ws, f"R{r}",
@@ -658,65 +678,85 @@ def write_calc(ws, lk: "Lookup", tabs: list[PropertyTables], layout: dict) -> No
 
 S_CHART = "차트데이터"
 
-def chart_points(tabs: list[PropertyTables]) -> int:
-    """포화선에 쓸 점 개수.
+#: 곡선 하나가 쓰는 열 수 (h, P)
+CURVE_COLS = 2
 
-    냉매마다 포화표 길이가 다르다(임계온도가 다르므로). 제일 짧은 것에
-    맞추면 빈칸을 NA() 로 채울 일이 없어진다. 빈칸을 두면 엑셀이 오류로
-    보고하고, 그 안에 진짜 오류가 섞여도 묻혀 버린다.
+#: 한 냉매가 선도데이터 시트에서 차지하는 열 수
+LINE_COLS = len(CHART_CURVES) * CURVE_COLS
+
+#: 사이클 경로 (상태점 번호 순서). 1 로 돌아와 고리를 닫는다.
+CYCLE_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1]
+
+#: 사이클 좌표가 들어가는 열 (선도 곡선들 다음 자리)
+CYCLE_C0 = 2 + LINE_COLS
+
+
+def write_lines_sheet(wb: Workbook, lines: list[ChartLines]) -> None:
+    """등온선·건도선·포화돔을 냉매별로 나란히 심는다.
+
+    이 선들은 냉매만 정해지면 결정된다. 운전조건과 무관하므로 엑셀이
+    매번 풀 이유가 없고, CoolProp 으로 미리 계산한 값을 그대로 둔다.
     """
-    return min(len(t.saturation) for t in tabs)
+    ws = wb.create_sheet(S_LINES)
+    ws["A1"] = "P-h 선도 보조선 (미리 계산한 값 — 고치지 말 것)"
+    ws["A1"].font = TITLE
+    for i, cl in enumerate(lines):
+        base = 2 + i * LINE_COLS
+        for j, curve in enumerate(cl.curves):
+            c0 = base + j * CURVE_COLS
+            head = f"{cl.refrigerant} {curve.label}"
+            ws.cell(row=2, column=c0, value=f"{head} h").font = HEAD
+            ws.cell(row=2, column=c0 + 1, value=f"{head} P").font = HEAD
+            for k, (h, pp) in enumerate(zip(curve.h, curve.p)):
+                ws.cell(row=3 + k, column=c0, value=round(h, 4))
+                ws.cell(row=3 + k, column=c0 + 1, value=round(pp, 4))
 
 
-def write_chart_data(wb: Workbook, tabs: list[PropertyTables], layout: dict):
-    """고른 냉매의 포화선과 사이클 경로를 차트가 읽을 자리에 뽑아 둔다.
+def write_chart_data(wb: Workbook, lines: list[ChartLines]) -> int:
+    """고른 냉매의 선들을 차트가 읽을 자리로 옮겨 적는다.
 
-    차트는 범위를 고정해 두어야 하므로, 자리는 늘 같게 잡고 쓰지 않는 칸은
-    NA() 로 채운다. 엑셀은 NA() 를 '점 없음' 으로 보고 건너뛴다.
+    차트는 참조 범위를 고정해 두어야 한다. 그래서 '고른 냉매의 블록을
+    여기로 베껴 오는' 칸을 따로 두고, 차트는 늘 이 자리만 본다.
     """
     ws = wb.create_sheet(S_CHART)
     ws["A1"] = "P-h 선도용 데이터"
     ws["A1"].font = TITLE
-    ws["A2"] = ("계산 시트에서 고른 냉매의 포화선을 뽑아 온다 — 고치지 말 것. "
-                "쓰지 않는 칸은 NA() 로 비워 둔다.")
+    ws["A2"] = ("계산 시트에서 고른 냉매의 선을 선도데이터 시트에서 "
+                "가져온다 — 고치지 말 것.")
     ws["A2"].font = NOTE
-    for c, h in enumerate(["번호", "포화액 h", "압력", "포화증기 h", "압력",
-                           "", "사이클 h", "사이클 압력", "상태점"], start=1):
-        cell = ws.cell(row=3, column=c, value=h)
-        cell.font = Font(name=FONT, size=9, bold=True)
-        ws.column_dimensions[get_column_letter(c)].width = 12
 
-    start = SAT_START
-    n_points = chart_points(tabs)
-    for i in range(n_points):
-        r = 4 + i
-        ws.cell(row=r, column=1, value=i + 1).font = Font(name=FONT, size=9)
-        src_row = f"({start}+{i})"
-        for col, sat_col_idx in ((2, 3), (4, 4)):       # hf, hg
-            letter = get_column_letter(sat_col_idx)
-            ws.cell(row=r, column=col,
-                    value=f"=INDEX('{S_SAT}'!${letter}:${letter},{src_row})")
-        for col in (3, 5):                               # 압력 (양쪽 같은 값)
-            ws.cell(row=r, column=col,
-                    value=f"=INDEX('{S_SAT}'!$B:$B,{src_row})")
-        for col in (2, 3, 4, 5):
-            ws.cell(row=r, column=col).font = Font(name=FONT, size=9)
-            ws.cell(row=r, column=col).number_format = "0.000"
+    n_pt = N_POINTS
+    last_col = get_column_letter(1 + len(lines) * LINE_COLS)
+    block = f"'{S_LINES}'!$B$3:${last_col}${2 + n_pt}"
 
-    # 사이클 경로 : 1→2→3→4→5→6→7→8→9→1
-    order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1]
-    for i, n in enumerate(order):
-        r = 4 + i
-        ws.cell(row=r, column=7, value=f"='{S_CALC}'!E{SR[n]}")
-        ws.cell(row=r, column=8, value=f"='{S_CALC}'!D{SR[n]}")
-        ws.cell(row=r, column=9, value=n)
-        for col in (7, 8, 9):
-            ws.cell(row=r, column=col).font = Font(name=FONT, size=9)
-            ws.cell(row=r, column=col).number_format = "0.000"
-    return len(order), n_points
+    for j, label in enumerate(CHART_CURVES):
+        c0 = 2 + j * CURVE_COLS
+        ws.cell(row=2, column=c0, value=f"{label} h").font = HEAD
+        ws.cell(row=2, column=c0 + 1, value=f"{label} P").font = HEAD
+        for k in range(n_pt):
+            for d in (0, 1):
+                col_in_block = f"({j * CURVE_COLS + 1 + d}+{LINE_OFF})"
+                ws.cell(row=3 + k, column=c0 + d,
+                        value=f"=INDEX({block},{k + 1},{col_in_block})")
+
+    # 사이클 경로는 운전조건에 따라 변하므로 계산 시트에서 직접 끌어온다.
+    ws.cell(row=2, column=CYCLE_C0, value="사이클 h").font = HEAD
+    ws.cell(row=2, column=CYCLE_C0 + 1, value="사이클 P").font = HEAD
+    for k, n in enumerate(CYCLE_ORDER):
+        ws.cell(row=3 + k, column=CYCLE_C0, value=f"='{S_CALC}'!E{SR[n]}")
+        ws.cell(row=3 + k, column=CYCLE_C0 + 1, value=f"='{S_CALC}'!D{SR[n]}")
+    return n_pt
 
 
-def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
+#: 선 모양 — (종류, 색, 굵기, 점선 여부)
+LINE_STYLE = {
+    "돔": ("4A4A4A", 20000, None),
+    "등온": ("D4A190", 7000, None),
+    "건도": ("B4BCC6", 7000, "sysDash"),
+}
+
+
+def add_ph_chart(calc_ws, n_points: int) -> None:
     """계산 시트에 P-h 선도를 붙인다."""
     chart = ScatterChart()
     chart.title = "P-h 선도"
@@ -724,8 +764,8 @@ def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
     chart.x_axis.title = "엔탈피 h [kJ/kg]"
     chart.y_axis.title = "압력 P [kPa]"
     chart.y_axis.scaling.logBase = 10          # 압력축은 로그로 본다
-    chart.height = 10
-    chart.width = 15
+    chart.height = 13
+    chart.width = 20
     chart.x_axis.delete = False
     chart.y_axis.delete = False
     # openpyxl 은 두 축 모두 'l'(왼쪽) 로 내놓는다. 가로축은 아래가 맞다.
@@ -733,26 +773,54 @@ def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
     # 눈금 숫자는 정수로. 안 그러면 '100.000' 처럼 길어져 비스듬히 눕는다.
     chart.x_axis.numFmt = "0"
     chart.y_axis.numFmt = "0"
-    # 포화선 데이터는 숨긴 시트에 있다. 이 값이 참이면 엑셀이 숨은 칸을
+    # 네 냉매를 모두 담는 범위로 고정한다. 냉매를 바꿔도 축이 출렁이지
+    # 않아야 선도끼리 눈으로 비교가 된다.
+    chart.x_axis.scaling.min = 100
+    chart.x_axis.scaling.max = 500
+    # 로그축의 눈금은 최솟값에서 한 자리씩 올라간다. 10 에서 시작해야
+    # 100 / 1000 / 10000 처럼 읽기 좋은 눈금이 나온다 (30 으로 두면
+    # 30 / 300 / 3000 이 된다).
+    chart.y_axis.scaling.min = 10
+    chart.y_axis.scaling.max = 10000
+    # 로그 모눈종이처럼 눈금선을 깐다. 압력을 눈으로 읽을 때 한 자리
+    # 사이를 가늠할 수 있어야 한다. 다만 선이 진하면 정작 봐야 할
+    # 등온선·사이클이 묻히므로, 보조선은 아주 연하게 깐다.
+    def _grid(color: str, width: int) -> Gridlines:
+        return Gridlines(spPr=GraphicalProperties(
+            ln=LineProperties(solidFill=color, w=width)))
+
+    chart.y_axis.minorGridlines = _grid("ECECEC", 3000)
+    chart.y_axis.majorGridlines = _grid("D9D9D9", 4500)
+    chart.x_axis.majorGridlines = _grid("D9D9D9", 4500)
+    # 보조선 데이터는 숨긴 시트에 있다. 이 값이 참이면 엑셀이 숨은 칸을
     # 빼고 그려서 선이 통째로 사라진다.
     chart.visible_cells_only = False
 
+    data = calc_ws.parent[S_CHART]
 
-    def line(x_col: int, y_col: int, rows: int, title: str, color: str,
-             width: int, marker: bool):
-        xs = Reference(calc_ws.parent[S_CHART], min_col=x_col, min_row=4,
-                       max_row=3 + rows)
-        ys = Reference(calc_ws.parent[S_CHART], min_col=y_col, min_row=4,
-                       max_row=3 + rows)
+    def series(x_col: int, y_col: int, rows: int, title: str,
+               color: str, width: int, dash: str | None, marker: bool):
+        xs = Reference(data, min_col=x_col, min_row=3, max_row=2 + rows)
+        ys = Reference(data, min_col=y_col, min_row=3, max_row=2 + rows)
         ser = Series(ys, xs, title=title)
-        ser.graphicalProperties.line = LineProperties(solidFill=color, w=width)
-        ser.marker = Marker(symbol="circle" if marker else "none", size=6)
+        ln = LineProperties(solidFill=color, w=width)
+        if dash:
+            ln.prstDash = dash
+        ser.graphicalProperties.line = ln
+        ser.marker = Marker(symbol="circle" if marker else "none", size=5)
         ser.smooth = False
         return ser
 
-    chart.series.append(line(2, 3, n_points, "포화액선", "6F6E68", 14000, False))
-    chart.series.append(line(4, 5, n_points, "포화증기선", "6F6E68", 14000, False))
-    chart.series.append(line(7, 8, n_cycle, "사이클", "2A78D6", 22000, True))
+    for j, label in enumerate(CHART_CURVES):
+        kind = CHART_KINDS[j]
+        color, width, dash = LINE_STYLE[kind]
+        c0 = 2 + j * CURVE_COLS
+        chart.series.append(
+            series(c0, c0 + 1, n_points, label, color, width, dash, False))
+
+    chart.series.append(
+        series(CYCLE_C0, CYCLE_C0 + 1, len(CYCLE_ORDER), "사이클",
+               "2A78D6", 24000, None, True))
 
     # 결과 바로 옆에 붙인다. 입력칸(B~D)을 가리지 않으면서 한 화면에 들어온다.
     calc_ws.add_chart(chart, "F6")
@@ -763,7 +831,7 @@ def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
 #: 이 한도가 없어서, 리브레로만 검사하면 절대 못 잡는다.
 EXCEL_FORMULA_LIMIT = 8192
 
-#: 여유를 두고 경고할 선. 한도의 절반이다.
+#: 여유를 두고 살펴볼 선. 한도의 절반이다.
 SAFE_FORMULA_LEN = 4096
 
 
@@ -780,7 +848,8 @@ def check_formula_lengths(wb: Workbook) -> list[tuple[str, str, int]]:
     return sorted(found, key=lambda t: -t[2])
 
 
-def build_workbook(tabs: list[PropertyTables], path: str) -> str:
+def build_workbook(tabs: list[PropertyTables], lines: list[ChartLines],
+                   path: str) -> str:
     """냉매 여러 개를 담은 계산서 하나를 만든다."""
     wb = Workbook()
     wb.remove(wb.active)
@@ -789,8 +858,9 @@ def build_workbook(tabs: list[PropertyTables], path: str) -> str:
     layout = write_tables(wb, tabs)
     lk = Lookup(look, tabs)
     write_calc(calc, lk, tabs, layout)
-    n_cycle, n_points = write_chart_data(wb, tabs, layout)
-    add_ph_chart(calc, n_cycle, n_points)
+    write_lines_sheet(wb, lines)
+    n_points = write_chart_data(wb, lines)
+    add_ph_chart(calc, n_points)
     calc.sheet_view.showGridLines = False
     # 인쇄 범위를 안 잡으면 빈 칸까지 끌고 가 수십 장이 나온다.
     calc.print_area = "A1:N80"
@@ -801,7 +871,7 @@ def build_workbook(tabs: list[PropertyTables], path: str) -> str:
 
     # 보조 시트는 숨긴다. 화면이 깔끔해지고 실수로 고칠 일도 줄어든다.
     # (엑셀에서 시트 탭 오른쪽 클릭 > 숨기기 취소 로 다시 볼 수 있다)
-    for name in (S_LOOK, S_CONF, S_SAT, S_H, S_S, S_D, S_CHART):
+    for name in (S_LOOK, S_CONF, S_SAT, S_H, S_S, S_D, S_CHART, S_LINES):
         wb[name].sheet_state = "hidden"
     wb.active = 0
 

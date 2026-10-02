@@ -216,12 +216,47 @@ def test_refrigerant_dropdown_lists_all(master) -> None:
 
 
 def test_ph_chart_exists(master) -> None:
-    """P-h 선도가 들어 있어야 한다 (포화액선·포화증기선·사이클)."""
+    """P-h 선도에 포화선·등온선·건도선·사이클이 모두 있어야 한다."""
+    from excel.build_workbook import CHART_CURVES
+
     ws = openpyxl.load_workbook(master)[CALC]
     assert len(ws._charts) == 1, "차트가 없다"
     chart = ws._charts[0]
-    assert len(chart.series) == 3, "선이 3개여야 한다"
+    assert len(chart.series) == len(CHART_CURVES) + 1, "선 개수가 안 맞는다"
     assert chart.y_axis.scaling.logBase == 10, "압력축이 로그가 아니다"
+
+
+def test_chart_has_isotherms(master) -> None:
+    """온도선이 있어야 한다. 온도를 못 읽는 선도는 쓸모가 적다."""
+    from excel.chartlines import ISOTHERMS
+
+    ws = openpyxl.load_workbook(master)[CALC]
+    titles = [s.tx.v for s in ws._charts[0].series if s.tx is not None]
+    for t in ISOTHERMS:
+        assert f"{t:g}°C" in titles, f"{t}°C 등온선이 없다"
+
+
+def test_chart_lines_follow_refrigerant(master) -> None:
+    """냉매마다 보조선 값이 달라야 한다 (한 냉매 것을 돌려쓰면 안 된다)."""
+    from excel.chartlines import build_many
+    from excel.make_all import REFRIGERANTS
+
+    lines = build_many(REFRIGERANTS)
+    domes = [tuple(round(v, 3) for v in cl.curves[0].h) for cl in lines]
+    assert len(set(domes)) == len(REFRIGERANTS), "포화 돔이 겹친다"
+
+
+def test_dome_closes_at_critical_point(master) -> None:
+    """포화 돔이 임계점에서 닫혀야 한다 (액선 끝 ≈ 증기선 끝)."""
+    from excel.chartlines import build_many
+    from excel.make_all import REFRIGERANTS
+
+    for cl in build_many(REFRIGERANTS):
+        dome = cl.curves[0]
+        half = len(dome.h) // 2
+        gap = abs(dome.h[half - 1] - dome.h[half])
+        span = max(dome.h) - min(dome.h)
+        assert gap < span * 0.08, f"{cl.refrigerant}: 돔이 {gap:.1f} 벌어졌다"
 
 
 def test_no_formula_exceeds_excel_limit(master) -> None:
