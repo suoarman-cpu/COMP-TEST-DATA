@@ -18,7 +18,10 @@ from openpyxl import Workbook
 from openpyxl.chart import Reference, ScatterChart, Series
 from openpyxl.chart.axis import ChartLines as Gridlines
 from openpyxl.chart.label import DataLabelList
-from openpyxl.chart.legend import Legend, LegendEntry
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import (CharacterProperties, Paragraph,
+                                   ParagraphProperties,
+                                   RichTextProperties)
 from openpyxl.chart.marker import Marker
 from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.drawing.line import LineProperties
@@ -26,38 +29,30 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
-from .chartlines import (ISOCHORE_STARTS, ISENTROPE_STARTS, ISOTHERMS,
-                         N_POINTS, QUALITIES, ChartLines)
+from .chartlines import (ENTROPIES, ISOTHERMS, N_POINTS, QUALITIES,
+                         VOLUMES, ChartLines)
 from .tables import PropertyTables
 from .version import CHANGELOG, REVISION, revision_label
 
 #: 선도에 그릴 곡선의 이름 — chartlines.build 가 내놓는 순서 그대로다.
 CHART_CURVES = (["포화선"]
-                + [f"{t:g}°C" for t in ISOTHERMS]
-                + [f"x={x:g}" for x in QUALITIES]
-                + [f"s@{t:g}°C" for t in ISENTROPE_STARTS]
-                + [f"v@{t:g}°C" for t in ISOCHORE_STARTS])
+                + [f"{t:g}" for t in ISOTHERMS]
+                + [f"{x:g}" for x in QUALITIES]
+                + [f"{v:g}" for v in ENTROPIES]
+                + [f"{v:g}" for v in VOLUMES])
 
 #: 같은 순서로 선 종류 (색·굵기를 정하는 데 쓴다)
 CHART_KINDS = (["돔"]
                + ["등온"] * len(ISOTHERMS)
                + ["건도"] * len(QUALITIES)
-               + ["등엔트로피"] * len(ISENTROPE_STARTS)
-               + ["등비체적"] * len(ISOCHORE_STARTS))
+               + ["등엔트로피"] * len(ENTROPIES)
+               + ["등비체적"] * len(VOLUMES))
 
-#: 선 위에 붙는 이름표 — chartlines 의 labels 순서와 같아야 한다.
-#: 등엔트로피선·등비체적선은 글자가 길어 온도 숫자와 겹친다. 이 둘만
-#: 범례로 밝히고, 숫자를 읽어야 하는 온도·건도는 선 위에 직접 적는다.
-LABEL_TEXTS = ([f"{t:g}°C" for t in ISOTHERMS]
-               + [f"{x:g}" for x in QUALITIES])
+#: 선 위에 붙는 이름표 — 포화선만 빼고 전부. chartlines 의 labels 순서와
+#: 같아야 한다.
+LABEL_TEXTS = CHART_CURVES[1:]
+LABEL_KINDS = CHART_KINDS[1:]
 N_LABELS = len(LABEL_TEXTS)
-
-#: 범례에 남길 선 — (곡선 번호, 범례에 쓸 이름)
-LEGEND_KEEP = {
-    0: "포화선",
-    1 + len(ISOTHERMS) + len(QUALITIES): "등엔트로피선",
-    1 + len(ISOTHERMS) + len(QUALITIES) + len(ISENTROPE_STARTS): "등비체적선",
-}
 
 FONT = "맑은 고딕"          # 전부 한글이라 한글 전용 서체를 쓴다
 
@@ -179,6 +174,23 @@ def write_tables(wb: Workbook, tabs: list[PropertyTables]) -> dict:
                                info["col_offset"], info["n_cols"],
                                i * LINE_COLS], start=1):
             conf.cell(row=4 + i, column=c, value=v).font = BLACK
+    # 고른 냉매의 표 위치를 여기서 찾아 둔다. 조회 수식들이 이 칸을 본다.
+    n = len(tabs)
+    conf["G1"] = "고른 냉매의 표 위치 (자동)"
+    conf["G1"].font = HEAD
+    for i, (label, col) in enumerate(
+            [("포화 시작행", 2), ("포화 끝행", 3), ("과열 열오프셋", 4),
+             ("과열 열수", 5), ("선도 열오프셋", 6)]):
+        r = 2 + i
+        conf[f"G{r}"] = label
+        conf[f"G{r}"].font = NOTE
+        letter = get_column_letter(col)
+        conf[f"H{r}"] = (
+            f"=INDEX($={letter}$4:${letter}${3 + n},"
+            f"MATCH('{S_CALC}'!$B$4,$A$4:$A${3 + n},0))".replace("$=", "$"))
+        conf[f"H{r}"].font = BLACK
+    conf.column_dimensions["G"].width = 16
+
     layout["_conf_rows"] = len(tabs)
     layout["_n_sh"] = len(tabs[0].superheats)
     return layout
@@ -194,13 +206,14 @@ def write_tables(wb: Workbook, tabs: list[PropertyTables]) -> dict:
 # 계산 시트에 두고(SAT_START/SAT_END/COL_OFF/N_COLS), 아래 수식들이 그걸
 # 참조한다. 시트 이름을 바꿔 끼우는 INDIRECT 보다 빠르고 덜 깨진다.
 
-#: 선택된 냉매의 표 위치가 들어 있는 칸 (계산 시트).
-#: P-h 선도가 F 열부터 앉으므로, 겹치지 않게 멀리 R 열로 빼 두었다.
-SAT_START = f"'{S_CALC}'!$R$5"
-SAT_END = f"'{S_CALC}'!$R$6"
-COL_OFF = f"'{S_CALC}'!$R$7"
-N_COLS = f"'{S_CALC}'!$R$8"
-LINE_OFF = f"'{S_CALC}'!$R$9"
+#: 선택된 냉매의 표 위치가 들어 있는 칸.
+#: 계산 시트에 두면 선도 옆에 숫자가 비어져 나온다. 숨긴 설정 시트에
+#: 둬야 쓰는 사람 눈에 안 띈다.
+SAT_START = f"'{S_CONF}'!$H$2"
+SAT_END = f"'{S_CONF}'!$H$3"
+COL_OFF = f"'{S_CONF}'!$H$4"
+N_COLS = f"'{S_CONF}'!$H$5"
+LINE_OFF = f"'{S_CONF}'!$H$6"
 
 
 def sat_col(column: int) -> str:
@@ -531,18 +544,6 @@ def write_calc(ws, lk: "Lookup", tabs: list[PropertyTables], layout: dict) -> No
     ws.add_data_validation(dv)
     dv.add(ws["B4"])
 
-    # 고른 냉매의 표 위치 (수식이 참조한다. 보기엔 거추장스러워 옆으로 뺐다)
-    conf_n = layout["_conf_rows"]
-    _put(ws, "Q4", "표 위치 (자동)", NOTE)
-    for i, (label, col) in enumerate(
-            [("포화 시작행", 2), ("포화 끝행", 3), ("과열 열오프셋", 4),
-             ("과열 열수", 5), ("선도 열오프셋", 6)]):
-        r = 5 + i
-        _put(ws, f"Q{r}", label, NOTE)
-        _put(ws, f"R{r}",
-             f"=INDEX('{S_CONF}'!${get_column_letter(col)}$4:"
-             f"${get_column_letter(col)}${3 + conf_n},"
-             f"MATCH($B$4,'{S_CONF}'!$A$4:$A${3 + conf_n},0))", NOTE)
 
     # ---- 결과 한눈에 ----
     _section(ws, 6, "■ 결과")
@@ -793,12 +794,14 @@ def write_chart_data(wb: Workbook, lines: list[ChartLines]) -> int:
 
 
 #: 선 모양 — (종류, 색, 굵기, 점선 여부)
+#: 선 모양 — (색, 굵기, 점선). 색은 실제 P-h 선도의 약속을 따른다.
+#: 온도 빨강 · 엔트로피 초록 · 비체적 파랑 · 건도 회색.
 LINE_STYLE = {
-    "돔": ("4A4A4A", 20000, None),
-    "등온": ("D4765A", 7000, None),
-    "건도": ("9AA6B4", 6500, "sysDash"),
-    "등엔트로피": ("7FA893", 6500, None),
-    "등비체적": ("A89BBF", 6500, "sysDot"),
+    "돔": ("000000", 20000, None),
+    "등온": ("C00000", 4500, None),
+    "건도": ("808080", 4000, "sysDash"),
+    "등엔트로피": ("1F7A3D", 4000, None),
+    "등비체적": ("2E5FA3", 4000, None),
 }
 
 
@@ -810,8 +813,8 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
     chart.x_axis.title = "엔탈피 h [kJ/kg]"
     chart.y_axis.title = "압력 P [kPa]"
     chart.y_axis.scaling.logBase = 10          # 압력축은 로그로 본다
-    chart.height = 13
-    chart.width = 20
+    chart.height = 16
+    chart.width = 25
     chart.x_axis.delete = False
     chart.y_axis.delete = False
     # openpyxl 은 두 축 모두 'l'(왼쪽) 로 내놓는다. 가로축은 아래가 맞다.
@@ -822,7 +825,7 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
     # 네 냉매를 모두 담는 범위로 고정한다. 냉매를 바꿔도 축이 출렁이지
     # 않아야 선도끼리 눈으로 비교가 된다.
     chart.x_axis.scaling.min = 100
-    chart.x_axis.scaling.max = 500
+    chart.x_axis.scaling.max = 600
     # 로그축의 눈금은 최솟값에서 한 자리씩 올라간다. 10 에서 시작해야
     # 100 / 1000 / 10000 처럼 읽기 좋은 눈금이 나온다 (30 으로 두면
     # 30 / 300 / 3000 이 된다).
@@ -862,13 +865,11 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
         color, width, dash = LINE_STYLE[kind]
         c0 = 2 + j * CURVE_COLS
         chart.series.append(
-            series(c0, c0 + 1, n_points, LEGEND_KEEP.get(j, label),
-                   color, width, dash, False))
+            series(c0, c0 + 1, n_points, label, color, width, dash, False))
 
-    CYCLE_SER_IDX = len(chart.series)
     chart.series.append(
         series(CYCLE_C0, CYCLE_C0 + 1, len(CYCLE_ORDER), "사이클",
-               "2A78D6", 24000, None, True))
+               "C0008C", 26000, None, True))
 
     # 선 위에 숫자를 직접 붙인다. 범례로 빼면 어느 선이 몇 도인지 알 수가
     # 없다 — 실제 P-h 선도가 그러듯 온도와 건도를 선 옆에 적는다.
@@ -876,6 +877,7 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
     # LibreOffice 둘 다에서 똑같이 나온다 (점마다 지정하는 방식은
     # LibreOffice 가 무시하고 모든 점에 값을 찍어 버린다).
     for k, text in enumerate(LABEL_TEXTS):
+        color = LINE_STYLE[LABEL_KINDS[k]][0]
         xs = Reference(data, min_col=LABEL_C0, min_row=3 + k, max_row=3 + k)
         ys = Reference(data, min_col=LABEL_C0 + 1, min_row=3 + k,
                        max_row=3 + k)
@@ -892,19 +894,19 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
         lbls.showLegendKey = False
         lbls.showBubbleSize = False
         lbls.dLblPos = "r"
+        # 숫자만 적으므로 (40, 0.4, 1.8 …) 글자색으로 무슨 선인지 가른다.
+        # 빨강이면 온도, 초록이면 엔트로피 — 실제 선도와 같은 약속이다.
+        rpr = CharacterProperties(solidFill=color, sz=750, b=False)
+        lbls.txPr = RichText(
+            bodyPr=RichTextProperties(),
+            p=[Paragraph(pPr=ParagraphProperties(defRPr=rpr),
+                         endParaRPr=rpr)])
         ser.dLbls = lbls
         chart.series.append(ser)
 
-    # 범례는 선 위에 이름표를 못 붙인 것만 남긴다. 온도·건도 숫자까지
-    # 범례로 보내면 어느 선이 몇 도인지 알아볼 수가 없다.
-    chart.legend = Legend()
-    chart.legend.position = "b"
-    chart.legend.overlay = False
-    chart.legend.legendEntry = [
-        LegendEntry(idx=i, delete=True)
-        for i in range(len(chart.series))
-        if i not in LEGEND_KEEP and i != CYCLE_SER_IDX
-    ]
+    # 범례는 없앤다. 숫자가 선 위에 적혀 있으니 군더더기인 데다, 계열이
+    # 80 개라 범례를 켜면 그림의 절반을 잡아먹는다.
+    chart.legend = None
 
     # 결과 바로 옆에 붙인다. 입력칸(B~D)을 가리지 않으면서 한 화면에 들어온다.
     calc_ws.add_chart(chart, "F6")
@@ -947,7 +949,7 @@ def build_workbook(tabs: list[PropertyTables], lines: list[ChartLines],
     add_ph_chart(calc, n_points)
     calc.sheet_view.showGridLines = False
     # 인쇄 범위를 안 잡으면 빈 칸까지 끌고 가 수십 장이 나온다.
-    calc.print_area = "A1:N80"
+    calc.print_area = "A1:T85"
     calc.sheet_properties.pageSetUpPr.fitToPage = True
     calc.page_setup.fitToWidth = 1
     calc.page_setup.fitToHeight = 0

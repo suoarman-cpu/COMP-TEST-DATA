@@ -235,7 +235,15 @@ def test_chart_has_isotherms(master) -> None:
     ws = openpyxl.load_workbook(master)[CALC]
     titles = [s.tx.v for s in ws._charts[0].series if s.tx is not None]
     for t in ISOTHERMS:
-        assert f"{t:g}°C" in titles, f"{t}°C 등온선이 없다"
+        assert f"{t:g}" in titles, f"{t}°C 등온선이 없다"
+
+
+def test_chart_has_all_four_line_families(master) -> None:
+    """실제 P-h 선도처럼 네 가지 보조선이 다 있어야 한다."""
+    from excel.build_workbook import CHART_KINDS
+
+    for kind in ("등온", "건도", "등엔트로피", "등비체적"):
+        assert kind in CHART_KINDS, f"{kind}선이 없다"
 
 
 def test_numbers_are_on_the_lines_not_in_the_legend(master) -> None:
@@ -256,16 +264,26 @@ def test_numbers_are_on_the_lines_not_in_the_legend(master) -> None:
         assert text in labelled, f"'{text}' 가 선 위에 안 적혀 있다"
 
 
-def test_legend_only_keeps_unlabelled_lines(master) -> None:
-    """범례에는 선 위에 이름을 못 붙인 것만 남아야 한다."""
-    from excel.build_workbook import LEGEND_KEEP
+def test_chart_has_no_legend(master) -> None:
+    """범례는 없어야 한다.
 
+    계열이 78 개라 범례를 켜면 그림의 절반을 잡아먹는다. 엑셀은
+    legendEntry 로 항목을 지우는 것도 무시한다 — 켜면 전부 나온다.
+    숫자는 선 위에 적혀 있으니 범례가 할 일이 없다.
+    """
     chart = openpyxl.load_workbook(master)[CALC]._charts[0]
-    assert chart.legend is not None, "범례가 통째로 없다"
-    deleted = {e.idx for e in chart.legend.legendEntry if e.delete}
-    kept = [i for i in range(len(chart.series)) if i not in deleted]
-    # 포화선 + 등엔트로피선 + 등비체적선 + 사이클
-    assert len(kept) == len(LEGEND_KEEP) + 1, f"범례에 {len(kept)}개가 남았다"
+    assert chart.legend is None, "범례가 켜져 있다"
+
+
+def test_helper_cells_are_off_the_calc_sheet(master) -> None:
+    """표 위치를 찾는 칸은 계산 시트에 있으면 안 된다.
+
+    선도 옆으로 숫자가 비어져 나온다. 숨긴 설정 시트에 둬야 한다.
+    """
+    ws = openpyxl.load_workbook(master)[CALC]
+    for row in ws.iter_rows(min_col=9, max_col=30):
+        for cell in row:
+            assert cell.value is None, f"{cell.coordinate} 에 {cell.value!r}"
 
 
 def test_every_series_is_straight(master) -> None:
