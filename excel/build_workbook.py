@@ -17,6 +17,8 @@ from __future__ import annotations
 from openpyxl import Workbook
 from openpyxl.chart import Reference, ScatterChart, Series
 from openpyxl.chart.axis import ChartLines as Gridlines
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.legend import Legend, LegendEntry
 from openpyxl.chart.marker import Marker
 from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.drawing.line import LineProperties
@@ -24,17 +26,38 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
-from .chartlines import ISOTHERMS, N_POINTS, QUALITIES, ChartLines
+from .chartlines import (ISOCHORE_STARTS, ISENTROPE_STARTS, ISOTHERMS,
+                         N_POINTS, QUALITIES, ChartLines)
 from .tables import PropertyTables
 from .version import CHANGELOG, REVISION, revision_label
 
 #: 선도에 그릴 곡선의 이름 — chartlines.build 가 내놓는 순서 그대로다.
 CHART_CURVES = (["포화선"]
                 + [f"{t:g}°C" for t in ISOTHERMS]
-                + [f"x={x:g}" for x in QUALITIES])
+                + [f"x={x:g}" for x in QUALITIES]
+                + [f"s@{t:g}°C" for t in ISENTROPE_STARTS]
+                + [f"v@{t:g}°C" for t in ISOCHORE_STARTS])
 
 #: 같은 순서로 선 종류 (색·굵기를 정하는 데 쓴다)
-CHART_KINDS = ["돔"] + ["등온"] * len(ISOTHERMS) + ["건도"] * len(QUALITIES)
+CHART_KINDS = (["돔"]
+               + ["등온"] * len(ISOTHERMS)
+               + ["건도"] * len(QUALITIES)
+               + ["등엔트로피"] * len(ISENTROPE_STARTS)
+               + ["등비체적"] * len(ISOCHORE_STARTS))
+
+#: 선 위에 붙는 이름표 — chartlines 의 labels 순서와 같아야 한다.
+#: 등엔트로피선·등비체적선은 글자가 길어 온도 숫자와 겹친다. 이 둘만
+#: 범례로 밝히고, 숫자를 읽어야 하는 온도·건도는 선 위에 직접 적는다.
+LABEL_TEXTS = ([f"{t:g}°C" for t in ISOTHERMS]
+               + [f"{x:g}" for x in QUALITIES])
+N_LABELS = len(LABEL_TEXTS)
+
+#: 범례에 남길 선 — (곡선 번호, 범례에 쓸 이름)
+LEGEND_KEEP = {
+    0: "포화선",
+    1 + len(ISOTHERMS) + len(QUALITIES): "등엔트로피선",
+    1 + len(ISOTHERMS) + len(QUALITIES) + len(ISENTROPE_STARTS): "등비체적선",
+}
 
 FONT = "맑은 고딕"          # 전부 한글이라 한글 전용 서체를 쓴다
 
@@ -690,6 +713,10 @@ CYCLE_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1]
 #: 사이클 좌표가 들어가는 열 (선도 곡선들 다음 자리)
 CYCLE_C0 = 2 + LINE_COLS
 
+#: 이름표 좌표가 들어가는 열 / 선도데이터 시트에서의 시작 행
+LABEL_C0 = CYCLE_C0 + 2
+LABEL_R0 = 3 + N_POINTS + 2
+
 
 def write_lines_sheet(wb: Workbook, lines: list[ChartLines]) -> None:
     """등온선·건도선·포화돔을 냉매별로 나란히 심는다.
@@ -710,6 +737,12 @@ def write_lines_sheet(wb: Workbook, lines: list[ChartLines]) -> None:
             for k, (h, pp) in enumerate(zip(curve.h, curve.p)):
                 ws.cell(row=3 + k, column=c0, value=round(h, 4))
                 ws.cell(row=3 + k, column=c0 + 1, value=round(pp, 4))
+        # 이름표 좌표는 곡선 블록 아래에 따로 쌓는다.
+        ws.cell(row=LABEL_R0 - 1, column=base, value="이름표 h").font = HEAD
+        ws.cell(row=LABEL_R0 - 1, column=base + 1, value="이름표 P").font = HEAD
+        for k, (_text, h, pp) in enumerate(cl.labels):
+            ws.cell(row=LABEL_R0 + k, column=base, value=round(h, 4))
+            ws.cell(row=LABEL_R0 + k, column=base + 1, value=round(pp, 4))
 
 
 def write_chart_data(wb: Workbook, lines: list[ChartLines]) -> int:
@@ -745,14 +778,27 @@ def write_chart_data(wb: Workbook, lines: list[ChartLines]) -> int:
     for k, n in enumerate(CYCLE_ORDER):
         ws.cell(row=3 + k, column=CYCLE_C0, value=f"='{S_CALC}'!E{SR[n]}")
         ws.cell(row=3 + k, column=CYCLE_C0 + 1, value=f"='{S_CALC}'!D{SR[n]}")
+
+    # 이름표 좌표. 한 점짜리 계열을 여기에 걸어 선 위에 글자를 띄운다.
+    lbl_last = get_column_letter(1 + len(lines) * LINE_COLS)
+    lbl_block = (f"'{S_LINES}'!$B${LABEL_R0}:"
+                 f"${lbl_last}${LABEL_R0 + N_LABELS - 1}")
+    ws.cell(row=2, column=LABEL_C0, value="이름표 h").font = HEAD
+    ws.cell(row=2, column=LABEL_C0 + 1, value="이름표 P").font = HEAD
+    for k in range(N_LABELS):
+        for d in (0, 1):
+            ws.cell(row=3 + k, column=LABEL_C0 + d,
+                    value=f"=INDEX({lbl_block},{k + 1},{1 + d}+{LINE_OFF})")
     return n_pt
 
 
 #: 선 모양 — (종류, 색, 굵기, 점선 여부)
 LINE_STYLE = {
     "돔": ("4A4A4A", 20000, None),
-    "등온": ("D4A190", 7000, None),
-    "건도": ("B4BCC6", 7000, "sysDash"),
+    "등온": ("D4765A", 7000, None),
+    "건도": ("9AA6B4", 6500, "sysDash"),
+    "등엔트로피": ("7FA893", 6500, None),
+    "등비체적": ("A89BBF", 6500, "sysDot"),
 }
 
 
@@ -816,11 +862,49 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
         color, width, dash = LINE_STYLE[kind]
         c0 = 2 + j * CURVE_COLS
         chart.series.append(
-            series(c0, c0 + 1, n_points, label, color, width, dash, False))
+            series(c0, c0 + 1, n_points, LEGEND_KEEP.get(j, label),
+                   color, width, dash, False))
 
+    CYCLE_SER_IDX = len(chart.series)
     chart.series.append(
         series(CYCLE_C0, CYCLE_C0 + 1, len(CYCLE_ORDER), "사이클",
                "2A78D6", 24000, None, True))
+
+    # 선 위에 숫자를 직접 붙인다. 범례로 빼면 어느 선이 몇 도인지 알 수가
+    # 없다 — 실제 P-h 선도가 그러듯 온도와 건도를 선 옆에 적는다.
+    # 한 점짜리 계열에 '계열 이름 표시' 를 켜는 방식이라야 엑셀과
+    # LibreOffice 둘 다에서 똑같이 나온다 (점마다 지정하는 방식은
+    # LibreOffice 가 무시하고 모든 점에 값을 찍어 버린다).
+    for k, text in enumerate(LABEL_TEXTS):
+        xs = Reference(data, min_col=LABEL_C0, min_row=3 + k, max_row=3 + k)
+        ys = Reference(data, min_col=LABEL_C0 + 1, min_row=3 + k,
+                       max_row=3 + k)
+        ser = Series(ys, xs, title=text)
+        ser.graphicalProperties.line = LineProperties(noFill=True)
+        ser.marker = Marker(symbol="none")
+        # 이 줄이 없으면 <c:smooth> 가 빠지고, LibreOffice 는 그걸 차트
+        # 전체에 적용해 사이클과 등온선까지 곡선으로 뭉개 버린다.
+        ser.smooth = False
+        lbls = DataLabelList()
+        lbls.showSerName = True
+        lbls.showVal = False
+        lbls.showCatName = False
+        lbls.showLegendKey = False
+        lbls.showBubbleSize = False
+        lbls.dLblPos = "r"
+        ser.dLbls = lbls
+        chart.series.append(ser)
+
+    # 범례는 선 위에 이름표를 못 붙인 것만 남긴다. 온도·건도 숫자까지
+    # 범례로 보내면 어느 선이 몇 도인지 알아볼 수가 없다.
+    chart.legend = Legend()
+    chart.legend.position = "b"
+    chart.legend.overlay = False
+    chart.legend.legendEntry = [
+        LegendEntry(idx=i, delete=True)
+        for i in range(len(chart.series))
+        if i not in LEGEND_KEEP and i != CYCLE_SER_IDX
+    ]
 
     # 결과 바로 옆에 붙인다. 입력칸(B~D)을 가리지 않으면서 한 화면에 들어온다.
     calc_ws.add_chart(chart, "F6")

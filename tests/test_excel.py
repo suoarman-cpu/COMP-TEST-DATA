@@ -219,10 +219,12 @@ def test_ph_chart_exists(master) -> None:
     """P-h 선도에 포화선·등온선·건도선·사이클이 모두 있어야 한다."""
     from excel.build_workbook import CHART_CURVES
 
+    from excel.build_workbook import N_LABELS
+
     ws = openpyxl.load_workbook(master)[CALC]
     assert len(ws._charts) == 1, "차트가 없다"
     chart = ws._charts[0]
-    assert len(chart.series) == len(CHART_CURVES) + 1, "선 개수가 안 맞는다"
+    assert len(chart.series) == len(CHART_CURVES) + 1 + N_LABELS
     assert chart.y_axis.scaling.logBase == 10, "압력축이 로그가 아니다"
 
 
@@ -236,6 +238,64 @@ def test_chart_has_isotherms(master) -> None:
         assert f"{t:g}°C" in titles, f"{t}°C 등온선이 없다"
 
 
+def test_numbers_are_on_the_lines_not_in_the_legend(master) -> None:
+    """온도·건도 숫자는 선 위에 적혀 있어야 한다.
+
+    범례로 빼면 어느 선이 몇 도인지 알아볼 수가 없다. 한 점짜리 계열에
+    '계열 이름 표시' 를 켜는 방식만 엑셀과 LibreOffice 둘 다에서 똑같이
+    나온다.
+    """
+    from excel.build_workbook import LABEL_TEXTS
+
+    ws = openpyxl.load_workbook(master)[CALC]
+    labelled = {
+        s.tx.v for s in ws._charts[0].series
+        if s.tx is not None and s.dLbls is not None and s.dLbls.showSerName
+    }
+    for text in LABEL_TEXTS:
+        assert text in labelled, f"'{text}' 가 선 위에 안 적혀 있다"
+
+
+def test_legend_only_keeps_unlabelled_lines(master) -> None:
+    """범례에는 선 위에 이름을 못 붙인 것만 남아야 한다."""
+    from excel.build_workbook import LEGEND_KEEP
+
+    chart = openpyxl.load_workbook(master)[CALC]._charts[0]
+    assert chart.legend is not None, "범례가 통째로 없다"
+    deleted = {e.idx for e in chart.legend.legendEntry if e.delete}
+    kept = [i for i in range(len(chart.series)) if i not in deleted]
+    # 포화선 + 등엔트로피선 + 등비체적선 + 사이클
+    assert len(kept) == len(LEGEND_KEEP) + 1, f"범례에 {len(kept)}개가 남았다"
+
+
+def test_every_series_is_straight(master) -> None:
+    """모든 계열에 smooth=0 이 적혀 있어야 한다.
+
+    <c:smooth> 를 빠뜨린 계열이 하나라도 있으면 LibreOffice 는 그걸
+    차트 전체에 적용해, 사이클을 둥근 덩어리로 뭉개 버린다.
+    """
+    chart = openpyxl.load_workbook(master)[CALC]._charts[0]
+    for i, ser in enumerate(chart.series):
+        assert ser.smooth is not None and not ser.smooth, f"{i}번 계열"
+
+
+def test_chart_labels_do_not_overlap(master) -> None:
+    """선 위 숫자끼리 겹치면 안 된다 — 냉매 4종 모두."""
+    from excel.chartlines import LABEL_H, _norm, build_many, label_width
+    from excel.make_all import REFRIGERANTS
+
+    for cl in build_many(REFRIGERANTS):
+        items = [(t, *_norm(h, p), label_width(t)) for t, h, p in cl.labels]
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                t1, x1, y1, w1 = items[i]
+                t2, x2, y2, w2 = items[j]
+                gap = max(abs(x1 - x2) / ((w1 + w2) / 2),
+                          abs(y1 - y2) / LABEL_H)
+                assert gap >= 1.0, (
+                    f"{cl.refrigerant}: '{t1}' 과 '{t2}' 가 겹친다 ({gap:.2f})")
+
+
 def test_chart_lines_follow_refrigerant(master) -> None:
     """냉매마다 보조선 값이 달라야 한다 (한 냉매 것을 돌려쓰면 안 된다)."""
     from excel.chartlines import build_many
@@ -246,17 +306,47 @@ def test_chart_lines_follow_refrigerant(master) -> None:
     assert len(set(domes)) == len(REFRIGERANTS), "포화 돔이 겹친다"
 
 
-def test_dome_closes_at_critical_point(master) -> None:
-    """포화 돔이 임계점에서 닫혀야 한다 (액선 끝 ≈ 증기선 끝)."""
+def test_pure_fluid_dome_closes_at_critical_point(master) -> None:
+    """순수냉매의 포화 돔은 임계점에서 닫혀야 한다 (액선 끝 ≈ 증기선 끝).
+
+    혼합냉매는 제외한다. R513A 는 임계점 근처에서 CoolProp 의 밀도 풀이가
+    깨진다 ("critical point finding routine found 2 critical points").
+    임계온도 4.4 K 아래까지가 한계라, 돔 꼭대기가 벌어진 채로 남는다.
+    없는 값을 지어내 메우느니 계산되는 데까지만 그린다 — 운전 범위는
+    임계점보다 45 K 아래라 쓰는 데 지장이 없다.
+    """
     from excel.chartlines import build_many
     from excel.make_all import REFRIGERANTS
 
-    for cl in build_many(REFRIGERANTS):
+    pure = [r for r in REFRIGERANTS if not r.endswith(".mix")]
+    assert pure, "순수냉매가 하나도 없다"
+    for cl in build_many(pure):
         dome = cl.curves[0]
         half = len(dome.h) // 2
         gap = abs(dome.h[half - 1] - dome.h[half])
         span = max(dome.h) - min(dome.h)
-        assert gap < span * 0.08, f"{cl.refrigerant}: 돔이 {gap:.1f} 벌어졌다"
+        assert gap < span * 0.02, f"{cl.refrigerant}: 돔이 {gap:.1f} 벌어졌다"
+
+
+def test_mixture_dome_is_drawn_as_far_as_coolprop_allows(master) -> None:
+    """혼합냉매 돔도 임계점 가까이까지는 올라가야 한다.
+
+    닫히지는 않지만, 중간에서 끊기면 그건 다른 문제다.
+    """
+    from excel.chartlines import build_many
+    from excel.make_all import REFRIGERANTS
+    from turbochiller.props import t_crit
+
+    mixes = [r for r in REFRIGERANTS if r.endswith(".mix")]
+    for cl in build_many(mixes):
+        dome = cl.curves[0]
+        tc = t_crit(cl.refrigerant)
+        import CoolProp
+        from CoolProp import AbstractState
+        st = AbstractState("HEOS", cl.refrigerant)
+        st.update(CoolProp.QT_INPUTS, 1.0, tc - 10.0 + 273.15)
+        assert max(dome.p) >= st.p() / 1000.0 * 0.98, (
+            f"{cl.refrigerant}: 돔이 임계점에서 10 K 넘게 모자란다")
 
 
 def test_no_formula_exceeds_excel_limit(master) -> None:
