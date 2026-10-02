@@ -222,3 +222,46 @@ def test_ph_chart_exists(master) -> None:
     chart = ws._charts[0]
     assert len(chart.series) == 3, "선이 3개여야 한다"
     assert chart.y_axis.scaling.logBase == 10, "압력축이 로그가 아니다"
+
+
+def test_no_formula_exceeds_excel_limit(master) -> None:
+    """엑셀은 수식 한 칸이 8192자를 넘으면 그 수식을 조용히 버린다.
+
+    오류 표시도 없이 값만 0 이 된다. LibreOffice 에는 이 한도가 없어서
+    리브레로 계산해 보는 것만으로는 절대 잡히지 않는다. 실제로 h2s/h4s
+    수식이 8333자였고, 엑셀에서 열면 압축 동력이 음수로 나왔다.
+    """
+    from excel.build_workbook import EXCEL_FORMULA_LIMIT
+
+    wb = openpyxl.load_workbook(master)
+    longest = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                v = cell.value
+                if isinstance(v, str) and v.startswith("="):
+                    longest.append((len(v), ws.title, cell.coordinate))
+    longest.sort(reverse=True)
+    assert longest, "수식이 하나도 없다"
+    n, sheet, coord = longest[0]
+    assert n <= EXCEL_FORMULA_LIMIT, f"{sheet}!{coord} 가 {n}자다"
+
+
+def test_formula_nesting_is_within_excel_limit(master) -> None:
+    """엑셀의 함수 중첩 한도는 64단이다."""
+    wb = openpyxl.load_workbook(master)
+    worst = 0
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                v = cell.value
+                if not (isinstance(v, str) and v.startswith("=")):
+                    continue
+                depth = 0
+                for ch in v:
+                    if ch == "(":
+                        depth += 1
+                        worst = max(worst, depth)
+                    elif ch == ")":
+                        depth -= 1
+    assert worst <= 64, f"중첩이 {worst}단이다"

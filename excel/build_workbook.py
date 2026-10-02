@@ -240,7 +240,11 @@ def inverse_dt(sheet: str, target_ref: str, p_ref: str, ci_ref: str,
     p0, p1 = f"INDEX({ps},{ci_ref})", f"INDEX({ps},{ci_ref}+1)"
 
     def in_column(col_expr: str) -> str:
-        col = f"INDEX({blk},0,{col_expr})"
+        # INDEX(범위,0,열) 로도 한 열을 통째로 집을 수 있지만, 행 번호 0 을
+        # 어떻게 보느냐가 엑셀 버전마다 미묘하다. 시작·끝을 또박또박 적어
+        # INDEX(..):INDEX(..) 로 잡으면 해석의 여지가 없다.
+        col = (f"INDEX({blk},1,{col_expr}):"
+               f"INDEX({blk},{n_rows},{col_expr})")
         i = f"MIN(MATCH({target_ref},{col},1),{n_rows - 1})"
         v0, v1 = f"INDEX({col},{i})", f"INDEX({col},{i}+1)"
         s0, s1 = f"INDEX({ds},{i})", f"INDEX({ds},{i}+1)"
@@ -269,16 +273,17 @@ class Lookup:
         ws["A2"] = ("물성표를 뒤져 보간하는 칸이다. 중간값을 일부러 펼쳐 두었다. "
                     "계산 시트가 여기 결과를 가져다 쓴다 — 직접 고치지 말 것.")
         ws["A2"].font = NOTE
-        for col, head in zip("ABCDEFGHIJK",
+        for col, head in zip("ABCDEFGHIJKLMNOPQ",
                              ["이름", "입력1", "입력2", "포화온도", "과열도",
-                              "행", "열", "결과1", "결과2", "결과3", "비고"]):
+                              "행", "열", "결과1", "결과2", "결과3", "비고",
+                              "sf", "sg", "hf", "hg", "건도", "과열 h"]):
             c = ws[f"{col}3"]
             c.value = head
             c.font = HEAD
             c.fill = HEAD_FILL
         ws.column_dimensions["A"].width = 26
         ws.column_dimensions["K"].width = 34
-        for col in "BCDEFGHIJ":
+        for col in "BCDEFGHIJLMNOPQ":
             ws.column_dimensions[col].width = 13
 
     def _label(self, name: str, note: str = "") -> int:
@@ -344,27 +349,27 @@ class Lookup:
         w[f"D{r}"] = sat_lookup(2, 1, f"C{r}")          # 포화온도
         w[f"G{r}"] = (f"=MIN(MATCH(C{r},{my_pressures(self.total_cols)},1),"
                       f"{N_COLS}-1)")
-        # 그 압력에서의 포화 물성 (2상인지 가르고, 2상이면 건도 계산에 쓴다)
-        sf = sat_lookup(1, 5, f"D{r}")[1:]
-        sg = sat_lookup(1, 6, f"D{r}")[1:]
-        hf = sat_lookup(1, 3, f"D{r}")[1:]
-        hg = sat_lookup(1, 4, f"D{r}")[1:]
-        # 건도 = (s - sf) / (sg - sf). 조각 수식을 이어 붙이므로 괄호를 꼭 친다.
-        quality = f"(B{r}-({sf}))/(({sg})-({sf}))"
-        w[f"K{r}"] = (f"=IF(B{r}>={sg},\"과열\",\"습압축 (건도 \"&"
-                      f"TEXT({quality},\"0.000\")&\")\")")
+        # 그 압력에서의 포화 물성. 한 칸씩 따로 둔다 — 수식 안에 통째로
+        # 끼워 넣으면 엑셀의 수식 길이 한도(8192자)를 넘겨 버린다.
+        w[f"L{r}"] = sat_lookup(1, 5, f"D{r}")          # sf
+        w[f"M{r}"] = sat_lookup(1, 6, f"D{r}")          # sg
+        w[f"N{r}"] = sat_lookup(1, 3, f"D{r}")          # hf
+        w[f"O{r}"] = sat_lookup(1, 4, f"D{r}")          # hg
+        w[f"P{r}"] = f"=(B{r}-L{r})/(M{r}-L{r})"        # 건도
+        w[f"K{r}"] = (f"=IF(B{r}>=M{r},\"과열\",\"습압축 (건도 \"&"
+                      f"TEXT(P{r},\"0.000\")&\")\")")
         w[f"K{r}"].font = NOTE
         # 과열 쪽 계산 (표 역보간)
         dt = inverse_dt(S_S, f"B{r}", f"C{r}", f"G{r}",
                         self.n_row, self.total_cols)[1:]
-        w[f"E{r}"] = f"=IF(B{r}>={sg},{dt},0)"
+        w[f"E{r}"] = f"=IF(B{r}>=M{r},{dt},0)"
         w[f"F{r}"] = (f"=MIN(MATCH(MAX(E{r},0),{grid_superheats(self.n_row)},1),"
                       f"{self.n_row - 1})")
-        hot = bilinear(S_H, f"E{r}", f"C{r}", f"F{r}", f"G{r}",
-                       self.n_row, self.total_cols)[1:]
-        wet = f"({hf})+({quality})*(({hg})-({hf}))"
-        w[f"H{r}"] = f"=IF(B{r}>={sg},{hot},{wet})"
-        for col in "BCDEH":
+        w[f"Q{r}"] = bilinear(S_H, f"E{r}", f"C{r}", f"F{r}", f"G{r}",
+                              self.n_row, self.total_cols)
+        # 과열이면 표 보간값, 습압축이면 건도로 포화액·포화증기 사이 배분
+        w[f"H{r}"] = f"=IF(B{r}>=M{r},Q{r},N{r}+P{r}*(O{r}-N{r}))"
+        for col in "BCDEHLMNOPQ":
             w[f"{col}{r}"].font = BLACK
             w[f"{col}{r}"].number_format = "0.0000"
         return f"'{S_LOOK}'!H{r}"
@@ -380,10 +385,11 @@ class Lookup:
         w[f"G{r}"] = (f"=MIN(MATCH(C{r},{my_pressures(self.total_cols)},1),"
                       f"{N_COLS}-1)")
         # 2상 영역이면 온도는 포화온도 그대로다 (과열도 0)
-        hg = sat_lookup(1, 4, f"D{r}")[1:]
+        w[f"O{r}"] = sat_lookup(1, 4, f"D{r}")          # hg
+        w[f"O{r}"].number_format = "0.0000"
         dt = inverse_dt(S_H, f"B{r}", f"C{r}", f"G{r}",
                         self.n_row, self.total_cols)[1:]
-        w[f"E{r}"] = f"=IF(B{r}>={hg},{dt},0)"
+        w[f"E{r}"] = f"=IF(B{r}>=O{r},{dt},0)"
         w[f"F{r}"] = (f"=MIN(MATCH(MAX(E{r},0),{grid_superheats(self.n_row)},1),"
                       f"{self.n_row - 1})")
         w[f"H{r}"] = f"=D{r}+E{r}"
@@ -752,6 +758,28 @@ def add_ph_chart(calc_ws, n_cycle: int, n_points: int) -> None:
     calc_ws.add_chart(chart, "F6")
 
 
+#: 엑셀의 수식 한 칸 길이 한도. 넘으면 엑셀이 파일을 열면서 그 수식을
+#: 조용히 버린다 — 오류 표시도 없이 값만 0 이 된다. LibreOffice 에는
+#: 이 한도가 없어서, 리브레로만 검사하면 절대 못 잡는다.
+EXCEL_FORMULA_LIMIT = 8192
+
+#: 여유를 두고 경고할 선. 한도의 절반이다.
+SAFE_FORMULA_LEN = 4096
+
+
+def check_formula_lengths(wb: Workbook) -> list[tuple[str, str, int]]:
+    """한도에 가까운 수식을 모두 찾아 돌려준다 (긴 것부터)."""
+    found = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                v = cell.value
+                if isinstance(v, str) and v.startswith("=") \
+                        and len(v) > SAFE_FORMULA_LEN:
+                    found.append((ws.title, cell.coordinate, len(v)))
+    return sorted(found, key=lambda t: -t[2])
+
+
 def build_workbook(tabs: list[PropertyTables], path: str) -> str:
     """냉매 여러 개를 담은 계산서 하나를 만든다."""
     wb = Workbook()
@@ -776,5 +804,21 @@ def build_workbook(tabs: list[PropertyTables], path: str) -> str:
     for name in (S_LOOK, S_CONF, S_SAT, S_H, S_S, S_D, S_CHART):
         wb[name].sheet_state = "hidden"
     wb.active = 0
+
+    # 저장하기 전에 수식 길이를 본다. 한도를 넘긴 파일은 엑셀에서 조용히
+    # 망가지므로 (리브레는 멀쩡히 돈다) 아예 내보내지 않는다.
+    long_ones = check_formula_lengths(wb)
+    over = [t for t in long_ones if t[2] > EXCEL_FORMULA_LIMIT]
+    if over:
+        lines = "\n".join(f"  {sh}!{cell}  {n}자" for sh, cell, n in over)
+        raise ValueError(
+            f"엑셀 수식 길이 한도({EXCEL_FORMULA_LIMIT}자)를 넘는 수식이 있다.\n"
+            f"{lines}\n중간값을 옆 칸으로 빼서 수식을 짧게 나눠야 한다."
+        )
+    if long_ones:
+        sh, cell, n = long_ones[0]
+        print(f"  제일 긴 수식: {sh}!{cell} {n}자 "
+              f"(한도 {EXCEL_FORMULA_LIMIT}자)")
+
     wb.save(path)
     return path
