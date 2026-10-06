@@ -50,8 +50,8 @@ CHART_KINDS = (["돔"]
 
 #: 선 위에 붙는 이름표. 순서·개수는 chartlines 가 정한다 — 같은 함수를
 #: 보게 해서 어긋날 여지를 없앴다.
-LABEL_TEXTS = [t for t, _k, _c, _n in label_plan()]
-LABEL_KINDS = [k for _t, k, _c, _n in label_plan()]
+LABEL_TEXTS = [sp.text for sp in label_plan()]
+LABEL_KINDS = [sp.kind for sp in label_plan()]
 N_LABELS = len(LABEL_TEXTS)
 
 FONT = "맑은 고딕"          # 전부 한글이라 한글 전용 서체를 쓴다
@@ -798,11 +798,16 @@ def write_chart_data(wb: Workbook, lines: list[ChartLines]) -> int:
 #: 온도 빨강 · 엔트로피 초록 · 비체적 파랑 · 건도 회색.
 LINE_STYLE = {
     "돔": ("000000", 20000, None),
-    "등온": ("C00000", 4500, None),
-    "건도": ("808080", 4000, "sysDash"),
-    "등엔트로피": ("1F7A3D", 4000, None),
-    "등비체적": ("2E5FA3", 4000, None),
+    "등온": ("C00000", 3500, None),
+    "건도": ("808080", 3500, "sysDash"),
+    "등엔트로피": ("1F7A3D", 3500, None),
+    "등비체적": ("2E5FA3", 3500, None),
+    #: 선이 아니라 압력축 눈금 글자다 (색만 쓴다)
+    "압력눈금": ("404040", 0, None),
 }
+
+#: 이름표를 점의 어느 쪽에 놓을지. 압력 눈금은 축 쪽(왼쪽)으로 빼야 한다.
+LABEL_POS = {"압력눈금": "l"}
 
 
 def add_ph_chart(calc_ws, n_points: int) -> None:
@@ -892,7 +897,7 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
         lbls.showCatName = False
         lbls.showLegendKey = False
         lbls.showBubbleSize = False
-        lbls.dLblPos = "r"
+        lbls.dLblPos = LABEL_POS.get(LABEL_KINDS[k], "r")
         # 숫자만 적으므로 (40, 0.4, 1.8 …) 글자색으로 무슨 선인지 가른다.
         # 빨강이면 온도, 초록이면 엔트로피 — 실제 선도와 같은 약속이다.
         rpr = CharacterProperties(solidFill=color, sz=750, b=False)

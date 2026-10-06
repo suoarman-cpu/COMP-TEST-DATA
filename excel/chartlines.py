@@ -43,13 +43,21 @@ H_MIN, H_MAX = 100.0, 600.0        # [kJ/kg]
 P_MIN, P_MAX = 50.0, 5000.0        # [kPa]
 
 #: 등온선 [°C]. 네 냉매 모두 임계온도(약 95°C) 아래다.
-#: 등온선 [°C]. -40°C 는 포화압력이 50 kPa 아래라 과열 쪽이 창 밖으로
-#: 나간다. -30°C 부터 잡는다.
-ISOTHERMS = [-30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0,
-             40.0, 50.0, 60.0, 70.0, 80.0]
+#: 등온선 [°C]. 5°C 간격으로 촘촘히 깐다. -40°C 는 포화압력이 50 kPa
+#: 아래라 과열 쪽이 창 밖으로 나간다. -30°C 부터 잡는다.
+ISOTHERMS = [-30.0 + 5.0 * i for i in range(23)]        # -30 ~ 80
+
+#: 숫자를 적을 등온선. 23 개에 다 적으면 읽을 수가 없다 — 10°C 마다만.
+ISOTHERM_LABELS = [t for t in ISOTHERMS if round(t) % 10 == 0]
 
 #: 과냉액 구간에도 온도를 적을 등온선. 전부 적으면 왼쪽이 숫자로 메워진다.
 LIQUID_LABELS = [-30.0, -10.0, 10.0, 30.0, 50.0, 70.0]
+
+#: 압력축에 손으로 달 눈금 [kPa].
+#: 엑셀 로그축은 열 배 간격(50/500/5000)만 찍는다. 그 사이를 읽을 수
+#: 있어야 선도 구실을 하므로, 선 이름표와 같은 방식으로 직접 단다.
+PRESSURE_TICKS = [70.0, 100.0, 150.0, 200.0, 300.0,
+                  700.0, 1000.0, 1500.0, 2000.0, 3000.0]
 
 #: 건도선
 QUALITIES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -334,8 +342,23 @@ def _clearance(x: float, y: float, w: float,
                for tx, ty, tw in taken)
 
 
-def label_plan() -> list[tuple[str, str, int, int]]:
-    """이름표를 붙일 순서. (글자, 종류, 곡선 번호, 몇 번째 이름표인가)
+@dataclass
+class LabelSpec:
+    """이름표 하나를 어디에 붙일지.
+
+    `curve` 가 있으면 그 선 위의 후보 가운데서 고른다. 없으면 `at` 에
+    못 박는다 (압력 눈금은 축에 딱 붙어야 하므로 자리를 고르면 안 된다).
+    """
+
+    text: str
+    kind: str
+    curve: int | None = None
+    which: int = 1                  # 1 = 기본, 2 = 등온선의 과냉액 쪽
+    at: tuple[float, float] | None = None       # (h, P)
+
+
+def label_plan() -> list[LabelSpec]:
+    """이름표를 붙일 순서.
 
     엑셀 차트의 계열 이름은 고정이라, 이 순서가 냉매와 무관하게 늘 같아야
     한다. 선도 데이터를 만드는 쪽과 엑셀을 쓰는 쪽이 같은 함수를 보게
@@ -343,23 +366,27 @@ def label_plan() -> list[tuple[str, str, int, int]]:
 
     곡선 번호는 build() 가 만드는 순서 그대로다 (0 번은 포화 돔).
     """
-    plan: list[tuple[str, str, int, int]] = []
     i0 = 1
     i_q = i0 + len(ISOTHERMS)
     i_s = i_q + len(QUALITIES)
     i_v = i_s + len(ENTROPIES)
 
-    for k, t in enumerate(ISOTHERMS):
-        plan.append((f"{t:g}", "등온", i0 + k, 1))
+    plan: list[LabelSpec] = []
+    # 압력 눈금을 먼저 박는다. 자리를 양보할 수 없는 쪽이 우선이다.
+    for pp in PRESSURE_TICKS:
+        plan.append(LabelSpec(f"{pp:g}", "압력눈금", at=(H_MIN, pp)))
+    for t in ISOTHERM_LABELS:
+        plan.append(LabelSpec(f"{t:g}", "등온", curve=i0 + ISOTHERMS.index(t)))
     for k, x in enumerate(QUALITIES):
-        plan.append((f"{x:g}", "건도", i_q + k, 1))
+        plan.append(LabelSpec(f"{x:g}", "건도", curve=i_q + k))
     for k, v in enumerate(ENTROPIES):
-        plan.append((f"{v:g}", "등엔트로피", i_s + k, 1))
+        plan.append(LabelSpec(f"{v:g}", "등엔트로피", curve=i_s + k))
     for k, v in enumerate(VOLUMES):
-        plan.append((f"{v:g}", "등비체적", i_v + k, 1))
+        plan.append(LabelSpec(f"{v:g}", "등비체적", curve=i_v + k))
     # 과냉액 쪽 온도는 맨 나중에 — 자리가 남을 때만 들어가라는 뜻이다.
     for t in LIQUID_LABELS:
-        plan.append((f"{t:g}", "등온", i0 + ISOTHERMS.index(t), 2))
+        plan.append(LabelSpec(f"{t:g}", "등온",
+                              curve=i0 + ISOTHERMS.index(t), which=2))
     return plan
 
 
@@ -371,15 +398,22 @@ def _place_labels(curves: list[Curve]) -> list[tuple[str, float, float]]:
     않는 자리를 고른다.
 
     개수는 냉매와 상관없이 늘 같아야 한다(차트 계열이 고정이라서).
-    그래서 끝내 자리가 없으면 그중 제일 덜 겹치는 자리라도 쓴다 — 네
-    냉매 모두 넉넉히 들어가는지는 테스트가 본다.
+    그래서 끝내 자리가 없으면 창 밖 좌표를 줘서 안 보이게 한다 — 빈 칸으로
+    두면 INDEX 가 0 을 돌려줘 (0, 0) 에 숫자가 찍힌다.
     """
     taken: list[tuple[float, float, float]] = []
     out: list[tuple[str, float, float]] = []
-    for text, _kind, ci, which in label_plan():
-        c = curves[ci]
-        cand = c.candidates if which == 1 else c.candidates2
-        w = label_width(text)
+    for spec in label_plan():
+        w = label_width(spec.text)
+        if spec.at is not None:              # 자리를 못 박은 것 (압력 눈금)
+            h, pp = spec.at
+            x, y = _norm(h, pp)
+            taken.append((x, y, w))
+            out.append((spec.text, h, pp))
+            continue
+
+        c = curves[spec.curve]
+        cand = c.candidates if spec.which == 1 else c.candidates2
         best, best_score = None, -1.0
         for i in cand:
             if i >= len(c.h) or math.isnan(c.h[i]):
@@ -391,14 +425,11 @@ def _place_labels(curves: list[Curve]) -> list[tuple[str, float, float]]:
             if score > best_score + 1e-9:
                 best, best_score = i, score
         if best is None:
-            # 선 자체가 창 밖이다. NaN 을 쓰면 엑셀 칸이 비고, INDEX 가
-            # 0 을 돌려줘 (0,0) 에 숫자가 찍힌다. 창 밖 좌표를 줘서
-            # 그려지지 않게 한다.
-            out.append((text, H_MIN - 1000.0, P_MIN))
+            out.append((spec.text, H_MIN - 1000.0, P_MIN))
             continue
         x, y = _norm(c.h[best], c.p[best])
         taken.append((x, y, w))
-        out.append((text, c.h[best], c.p[best]))
+        out.append((spec.text, c.h[best], c.p[best]))
     return out
 
 
