@@ -36,20 +36,31 @@ N_POINTS = 60
 
 #: 선도가 그려지는 창
 H_MIN, H_MAX = 100.0, 600.0        # [kJ/kg]
-P_MIN, P_MAX = 10.0, 10000.0       # [kPa]
+# 로그축의 눈금은 최솟값에서 열 배씩 올라간다. 50~5000 으로 잡아야
+# 50 / 500 / 5000 셋이 다 찍힌다. 10~5000 으로 두면 10 / 100 / 1000 만
+# 찍히고 위쪽 1000~5000 (그림의 1/3) 에 눈금 숫자가 하나도 없다.
+# 50 kPa 은 이 냉매들로 약 -35°C 다. 터보 냉동기 운전 범위 한참 아래다.
+P_MIN, P_MAX = 50.0, 5000.0        # [kPa]
 
 #: 등온선 [°C]. 네 냉매 모두 임계온도(약 95°C) 아래다.
-ISOTHERMS = [-40.0, -30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0,
+#: 등온선 [°C]. -40°C 는 포화압력이 50 kPa 아래라 과열 쪽이 창 밖으로
+#: 나간다. -30°C 부터 잡는다.
+ISOTHERMS = [-30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0,
              40.0, 50.0, 60.0, 70.0, 80.0]
+
+#: 과냉액 구간에도 온도를 적을 등온선. 전부 적으면 왼쪽이 숫자로 메워진다.
+LIQUID_LABELS = [-30.0, -10.0, 10.0, 30.0, 50.0, 70.0]
 
 #: 건도선
 QUALITIES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 #: 등엔트로피선 [kJ/kg·K]
-ENTROPIES = [1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3]
+#: 등엔트로피선 [kJ/kg·K]. 2.3 은 창 오른쪽 밖이라 뺐다.
+ENTROPIES = [1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2]
 
 #: 등비체적선 [m³/kg]
-VOLUMES = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+#: 등비체적선 [m³/kg]. 1.0 은 너무 묽어 50 kPa 위로 안 올라온다.
+VOLUMES = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
 
 #: 글자가 차지하는 세로 높이 (창 크기를 1 로 본 상대 크기).
 LABEL_H = 0.042
@@ -77,6 +88,8 @@ class Curve:
     label_idx: int | None = None
     #: 이름표를 놓아도 되는 점 번호들
     candidates: tuple[int, ...] = ()
+    #: 두 번째 이름표(등온선의 과냉액 쪽)를 놓아도 되는 점 번호들
+    candidates2: tuple[int, ...] = ()
 
     @property
     def label_point(self) -> tuple[str, float, float] | None:
@@ -92,15 +105,10 @@ class ChartLines:
 
     refrigerant: str
     curves: list[Curve]
-
-    @property
-    def labels(self) -> list[tuple[str, float, float]]:
-        """선 위에 찍을 이름표들. (글자, h, P)
-
-        범례로 빼면 어느 선이 몇 도인지 알 수가 없다. 실제 P-h 선도가
-        그렇듯 선 옆에 숫자를 직접 붙인다.
-        """
-        return [pt for c in self.curves if (pt := c.label_point) is not None]
+    #: 선 위에 찍을 이름표들. (글자, h, P) — label_plan() 순서다.
+    #: 범례로 빼면 어느 선이 몇 도인지 알 수가 없다. 실제 P-h 선도가
+    #: 그렇듯 선 옆에 숫자를 직접 붙인다.
+    labels: list[tuple[str, float, float]] = field(default_factory=list)
 
 
 def _inside(h: float, pp: float) -> bool:
@@ -163,10 +171,12 @@ def _dome(state, t_min: float, t_top: float) -> Curve:
             hg, pg = state.hmass() / 1000.0, state.p() / 1000.0
         except Exception:
             break
-        liq_h.append(hf)
-        liq_p.append(pf)
-        vap_h.append(hg)
-        vap_p.append(pg)
+        if _inside(hf, pf):
+            liq_h.append(hf)
+            liq_p.append(pf)
+        if _inside(hg, pg):
+            vap_h.append(hg)
+            vap_p.append(pg)
     h, p = _pad(liq_h + vap_h[::-1], liq_p + vap_p[::-1])
     return Curve("돔", "포화선", h, p)
 
@@ -219,10 +229,12 @@ def _isotherm(state, t: float) -> Curve:
             h.append(hh)
             p.append(pp)
 
+    n_liq_real = vapor0 - 1          # 2상 두 점 앞까지가 과냉액 구간
     n_real = len(h)
     h, p = _pad(h, p)
     return Curve("등온", name, h, p,
-                 candidates=tuple(range(vapor0 + 1, n_real)))
+                 candidates=tuple(range(vapor0 + 1, n_real)),
+                 candidates2=tuple(range(max(0, n_liq_real))))
 
 
 def _quality(state, x: float, t_min: float, t_top: float) -> Curve:
@@ -266,8 +278,10 @@ def _isentrope(state, s_val: float) -> Curve:
             p.append(pp)
     n_real = len(h)
     h, p = _pad(h, p)
-    return Curve("등엔트로피", f"{s_val:g}", h, p,
-                 candidates=tuple(range(n_real)))
+    # 바닥에 붙으면 가로축 숫자와 엉킨다. 가운데 높이로 올린다.
+    cand = tuple(i for i in range(n_real) if 0.15 < _norm(h[i], p[i])[1] < 0.92)
+    return Curve("등엔트로피", f"{s_val:g}", h, p, candidates=cand or
+                 tuple(range(n_real)))
 
 
 def _isochore(state, v_val: float) -> Curve:
@@ -297,8 +311,10 @@ def _isochore(state, v_val: float) -> Curve:
         p = [p[i] for i in idx]
     n_real = len(h)
     h, p = _pad(h, p)
-    return Curve("등비체적", f"{v_val:g}", h, p,
-                 candidates=tuple(range(n_real)))
+    # 돔 안에 적으면 건도 숫자와 엉킨다. 과열 쪽(오른쪽)에 적는다.
+    cand = tuple(i for i in range(n_real) if _norm(h[i], p[i])[0] > 0.45)
+    return Curve("등비체적", f"{v_val:g}", h, p, candidates=cand or
+                 tuple(range(n_real)))
 
 
 def _norm(h: float, pp: float) -> tuple[float, float]:
@@ -318,21 +334,54 @@ def _clearance(x: float, y: float, w: float,
                for tx, ty, tw in taken)
 
 
-def _place_labels(curves: list[Curve]) -> None:
+def label_plan() -> list[tuple[str, str, int, int]]:
+    """이름표를 붙일 순서. (글자, 종류, 곡선 번호, 몇 번째 이름표인가)
+
+    엑셀 차트의 계열 이름은 고정이라, 이 순서가 냉매와 무관하게 늘 같아야
+    한다. 선도 데이터를 만드는 쪽과 엑셀을 쓰는 쪽이 같은 함수를 보게
+    해서 어긋날 여지를 없앴다.
+
+    곡선 번호는 build() 가 만드는 순서 그대로다 (0 번은 포화 돔).
+    """
+    plan: list[tuple[str, str, int, int]] = []
+    i0 = 1
+    i_q = i0 + len(ISOTHERMS)
+    i_s = i_q + len(QUALITIES)
+    i_v = i_s + len(ENTROPIES)
+
+    for k, t in enumerate(ISOTHERMS):
+        plan.append((f"{t:g}", "등온", i0 + k, 1))
+    for k, x in enumerate(QUALITIES):
+        plan.append((f"{x:g}", "건도", i_q + k, 1))
+    for k, v in enumerate(ENTROPIES):
+        plan.append((f"{v:g}", "등엔트로피", i_s + k, 1))
+    for k, v in enumerate(VOLUMES):
+        plan.append((f"{v:g}", "등비체적", i_v + k, 1))
+    # 과냉액 쪽 온도는 맨 나중에 — 자리가 남을 때만 들어가라는 뜻이다.
+    for t in LIQUID_LABELS:
+        plan.append((f"{t:g}", "등온", i0 + ISOTHERMS.index(t), 2))
+    return plan
+
+
+def _place_labels(curves: list[Curve]) -> list[tuple[str, float, float]]:
     """이름표를 서로 겹치지 않는 자리에 놓는다.
 
     자리를 미리 못 박아 두면 냉매에 따라 숫자가 서로 포개진다. 선마다
     '여기면 된다' 하는 후보 구간을 받아 두고, 이미 놓은 이름표와 겹치지
-    않는 자리를 고른다. 어디에도 자리가 없으면 그 선은 이름표를 **포기
-    한다** — 겹쳐 적느니 안 적는 게 낫다.
+    않는 자리를 고른다.
+
+    개수는 냉매와 상관없이 늘 같아야 한다(차트 계열이 고정이라서).
+    그래서 끝내 자리가 없으면 그중 제일 덜 겹치는 자리라도 쓴다 — 네
+    냉매 모두 넉넉히 들어가는지는 테스트가 본다.
     """
     taken: list[tuple[float, float, float]] = []
-    for c in curves:
-        if not c.candidates:
-            continue
-        w = label_width(c.label)
-        best, best_score = None, 0.0
-        for i in c.candidates:
+    out: list[tuple[str, float, float]] = []
+    for text, _kind, ci, which in label_plan():
+        c = curves[ci]
+        cand = c.candidates if which == 1 else c.candidates2
+        w = label_width(text)
+        best, best_score = None, -1.0
+        for i in cand:
             if i >= len(c.h) or math.isnan(c.h[i]):
                 continue
             x, y = _norm(c.h[i], c.p[i])
@@ -341,10 +390,16 @@ def _place_labels(curves: list[Curve]) -> None:
             score = min(_clearance(x, y, w, taken), 1.1)
             if score > best_score + 1e-9:
                 best, best_score = i, score
-        if best is not None and best_score >= 1.0:
-            c.label_idx = best
-            x, y = _norm(c.h[best], c.p[best])
-            taken.append((x, y, w))
+        if best is None:
+            # 선 자체가 창 밖이다. NaN 을 쓰면 엑셀 칸이 비고, INDEX 가
+            # 0 을 돌려줘 (0,0) 에 숫자가 찍힌다. 창 밖 좌표를 줘서
+            # 그려지지 않게 한다.
+            out.append((text, H_MIN - 1000.0, P_MIN))
+            continue
+        x, y = _norm(c.h[best], c.p[best])
+        taken.append((x, y, w))
+        out.append((text, c.h[best], c.p[best]))
+    return out
 
 
 def build(refrigerant: str, t_min: float = -60.0) -> ChartLines:
@@ -359,8 +414,7 @@ def build(refrigerant: str, t_min: float = -60.0) -> ChartLines:
     curves += [_quality(state, x, t_min, t_top) for x in QUALITIES]
     curves += [_isentrope(state, s) for s in ENTROPIES]
     curves += [_isochore(state, v) for v in VOLUMES]
-    _place_labels(curves)
-    return ChartLines(refrigerant, curves)
+    return ChartLines(refrigerant, curves, _place_labels(curves))
 
 
 def build_many(refrigerants: list[str],

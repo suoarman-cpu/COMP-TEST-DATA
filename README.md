@@ -324,7 +324,7 @@ CoolProp 이 아는 냉매는 모두 쓸 수 있다.
 물성표를 시트에 심어 두었으므로 REFPROP·CoolProp **애드인이 필요 없다**.
 
 ```bash
-python -m excel.make_all      # excel/출력/터보냉동기_사이클계산_Rev7.xlsx
+python -m excel.make_all      # excel/출력/터보냉동기_사이클계산_Rev8.xlsx
 ```
 
 - 냉매 4종(R1234ze(E)·R134a·R1234yf·R513A)이 한 파일에 들어 있고 **B4 에서 고른다**

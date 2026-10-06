@@ -30,7 +30,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
 from .chartlines import (ENTROPIES, ISOTHERMS, N_POINTS, QUALITIES,
-                         VOLUMES, ChartLines)
+                         VOLUMES, ChartLines, label_plan)
 from .tables import PropertyTables
 from .version import CHANGELOG, REVISION, revision_label
 
@@ -48,10 +48,10 @@ CHART_KINDS = (["돔"]
                + ["등엔트로피"] * len(ENTROPIES)
                + ["등비체적"] * len(VOLUMES))
 
-#: 선 위에 붙는 이름표 — 포화선만 빼고 전부. chartlines 의 labels 순서와
-#: 같아야 한다.
-LABEL_TEXTS = CHART_CURVES[1:]
-LABEL_KINDS = CHART_KINDS[1:]
+#: 선 위에 붙는 이름표. 순서·개수는 chartlines 가 정한다 — 같은 함수를
+#: 보게 해서 어긋날 여지를 없앴다.
+LABEL_TEXTS = [t for t, _k, _c, _n in label_plan()]
+LABEL_KINDS = [k for _t, k, _c, _n in label_plan()]
 N_LABELS = len(LABEL_TEXTS)
 
 FONT = "맑은 고딕"          # 전부 한글이라 한글 전용 서체를 쓴다
@@ -826,11 +826,10 @@ def add_ph_chart(calc_ws, n_points: int) -> None:
     # 않아야 선도끼리 눈으로 비교가 된다.
     chart.x_axis.scaling.min = 100
     chart.x_axis.scaling.max = 600
-    # 로그축의 눈금은 최솟값에서 한 자리씩 올라간다. 10 에서 시작해야
-    # 100 / 1000 / 10000 처럼 읽기 좋은 눈금이 나온다 (30 으로 두면
-    # 30 / 300 / 3000 이 된다).
-    chart.y_axis.scaling.min = 10
-    chart.y_axis.scaling.max = 10000
+    # 로그축의 눈금은 최솟값에서 열 배씩 올라간다. 50~5000 이라야
+    # 50 / 500 / 5000 셋이 다 찍힌다 (chartlines 의 P_MIN/P_MAX 와 같다).
+    chart.y_axis.scaling.min = 50
+    chart.y_axis.scaling.max = 5000
     # 로그 모눈종이처럼 눈금선을 깐다. 압력을 눈으로 읽을 때 한 자리
     # 사이를 가늠할 수 있어야 한다. 다만 선이 진하면 정작 봐야 할
     # 등온선·사이클이 묻히므로, 보조선은 아주 연하게 깐다.

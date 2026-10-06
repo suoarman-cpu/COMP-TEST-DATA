@@ -340,8 +340,12 @@ def test_pure_fluid_dome_closes_at_critical_point(master) -> None:
     assert pure, "순수냉매가 하나도 없다"
     for cl in build_many(pure):
         dome = cl.curves[0]
-        half = len(dome.h) // 2
-        gap = abs(dome.h[half - 1] - dome.h[half])
+        # 돔은 포화액선을 올라갔다가 포화증기선을 내려온다. 꼭지점(압력이
+        # 제일 높은 점)이 두 가지가 만나는 자리다. 배열 한가운데가 아니다
+        # — 창 밖 점을 잘라내면 가지 길이가 달라지고, 뒤는 마지막 점을
+        # 되풀이해 채우기 때문이다.
+        apex = max(range(len(dome.p)), key=lambda i: dome.p[i])
+        gap = abs(dome.h[apex] - dome.h[apex + 1])
         span = max(dome.h) - min(dome.h)
         assert gap < span * 0.02, f"{cl.refrigerant}: 돔이 {gap:.1f} 벌어졌다"
 
