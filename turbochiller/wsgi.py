@@ -24,7 +24,7 @@ import os
 import urllib.parse
 from typing import Callable, Iterable, Optional
 
-from .webui import render_page
+from .webui import render_gagerr_page, render_page
 
 #: 아이디를 따로 정하지 않았을 때
 DEFAULT_USER = "turbo"
@@ -153,7 +153,10 @@ def create_app(
         )
         try:
             # hosted=True 면 '종료' 버튼을 빼고 그린다
-            page = render_page(query, hosted=True)
+            if path.rstrip("/") == "/gagerr":
+                page = render_gagerr_page(query, hosted=True)
+            else:
+                page = render_page(query, hosted=True)
         except Exception as exc:
             page = (
                 "<!doctype html><meta charset='utf-8'>"

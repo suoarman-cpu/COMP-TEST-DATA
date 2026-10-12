@@ -11,6 +11,7 @@ streamlit / pandas / pyarrow 가 필요 없다.
 from __future__ import annotations
 
 import html as html_mod
+import math
 import os
 import socket
 import subprocess
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
+from . import gagerr
 from .cycle import CycleInput, CycleResult, ExcelCompat, solve
 from .hx import condenser_side, evaporator_side
 from .retrofit import retrofit
@@ -247,6 +249,39 @@ tbody tr:last-child td{border-bottom:0}
 .bye{max-width:520px;margin:12vh auto;text-align:center;padding:26px;
   background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .bye h1{font-size:19px;margin-bottom:8px}
+/* --- 위쪽 메뉴 (사이클 해석 / 게이지 R&R) --- */
+.nav{display:flex;gap:6px;margin:0 0 12px}
+.nav a{padding:6px 13px;border:1px solid var(--line);border-radius:999px;
+  color:var(--ink2);text-decoration:none;font-size:13px;font-weight:600;
+  background:var(--panel)}
+.nav a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+/* --- 게이지 R&R --- */
+:root{--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;
+      --s5:#e87ba4;--s6:#008300;--s7:#6250d6;--s8:#e34948}
+@media (prefers-color-scheme: dark){
+  :root{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;
+        --s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767}
+}
+textarea{width:100%;min-height:230px;padding:8px 9px;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);color:var(--ink);font-size:12px;
+  font-family:Consolas,'D2Coding',ui-monospace,monospace;line-height:1.45;
+  white-space:pre;overflow:auto}
+input[type=text]{width:100%;padding:7px 9px;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px;
+  font-family:inherit}
+.badge{display:inline-block;padding:3px 12px;border-radius:999px;font-weight:700;
+  font-size:15px;border:1px solid}
+.badge.ok{color:#0d6e4b;background:#e3f6ee;border-color:#a9e2cb}
+.badge.mid{color:#7a4a00;background:#fdf2dc;border-color:#f0d39a}
+.badge.ng{color:#8a1d18;background:#fdecea;border-color:#f5c2bd}
+@media (prefers-color-scheme: dark){
+  .badge.ok{color:#7fe0b8;background:#0f2f23;border-color:#1e5a43}
+  .badge.mid{color:#ffcf7a;background:#33250c;border-color:#5b4416}
+  .badge.ng{color:#ffb3ab;background:#3a1512;border-color:#5e241e}
+}
+.reasons{margin:10px 0 0;padding-left:18px;color:var(--ink2);font-size:13px}
+.guide{color:var(--ink2);font-size:12.5px}
+.guide b{color:var(--ink)}
 /* --- 폰 화면 --- */
 @media (max-width:900px){
   /* 결과를 먼저 보여준다. 입력칸이 20개라 그게 먼저 나오면
@@ -574,6 +609,7 @@ def render_page(query: dict[str, list[str]], hosted: bool = False) -> str:
 <div class="wrap">
   <aside id="inputs"><div class="card">{render_form(values)}</div></aside>
   <main>
+    {nav_html("cycle")}
     <div class="head">
       <div>
         <h1>터보 냉동기 사이클 해석</h1>
@@ -585,6 +621,250 @@ def render_page(query: dict[str, list[str]], hosted: bool = False) -> str:
   </main>
 </div>
 <a class="jump" href="#inputs">입력값 고치기 ↓</a>
+</body></html>"""
+
+
+def nav_html(current: str) -> str:
+    """위쪽 메뉴. 두 화면을 오간다."""
+    items = [("cycle", "/", "사이클 해석"), ("gagerr", "/gagerr", "게이지 R&R")]
+    links = []
+    for key, href, label in items:
+        on = ' class="on"' if key == current else ""
+        links.append(f'<a href="{href}"{on}>{esc(label)}</a>')
+    return '<nav class="nav">' + "".join(links) + "</nav>"
+
+
+# ---------------------------------------------------------------------------
+# 게이지 R&R 화면
+# ---------------------------------------------------------------------------
+
+GAGERR_GUIDE = """
+<p class="guide"><b>데이터 붙여넣기</b> — 엑셀에서 표를 그대로 복사해 붙이면 됩니다.
+두 가지 모양을 받습니다.</p>
+<p class="guide">· 넓은 표: 첫 칸 <b>부품</b>, 나머지 머리글 <b>A-1, A-2, B-1 …</b>
+(측정자-회차)<br>
+· 긴 표: 머리글에 <b>부품, 측정자, 측정값</b> (반복 칸은 있어도 됨)</p>
+<p class="guide">보통 <b>부품 10개 × 측정자 3명 × 3회</b>.
+부품은 실제 공정 산포를 대표하도록 고르고, 순서는 섞어서 잰다.</p>
+"""
+
+
+def _opt_float(query: dict[str, list[str]], key: str) -> Optional[float]:
+    raw = (query.get(key, [""])[0] or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"'{raw}' 를 숫자로 읽을 수 없습니다.") from None
+
+
+def _pct(x: Optional[float]) -> str:
+    return "-" if x is None else f"{x:.2f}"
+
+
+def _num(x: float) -> str:
+    return f"{x:.5g}"
+
+
+def render_gagerr_results(res: "gagerr.GageResult",
+                          xr: Optional["gagerr.GageResult"]) -> str:
+    s = res.study
+    verdict, reasons = gagerr.overall_verdict(res)
+    cls = {"적합": "ok", "조건부": "mid", "부적합": "ng"}[verdict]
+    cc = gagerr.chart_check(s)
+    if cc.out_r:
+        reasons.append(
+            "R 관리도 UCL 을 넘은 반복 측정: "
+            + ", ".join(f"부품 {p}/측정자 {o}" for p, o, _ in cc.out_r)
+            + " — 그 조합은 다시 재 보세요"
+        )
+    reasons.append(
+        f"X̄ 관리도 한계 밖 점 {cc.pct_x_outside:.0f}% — "
+        + ("부품 차이를 잘 가릅니다 (50% 이상)" if cc.pct_x_outside >= 50
+           else "부품 차이에 비해 측정 흩어짐이 큽니다 (50% 미만)")
+    )
+
+    out = ['<div class="card">']
+    out.append(
+        f'<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+        f'<span class="badge {cls}">{esc(verdict)}</span>'
+        f'<span class="sub" style="margin:0">ANOVA 법 · 부품 {s.n_parts}개 × '
+        f'측정자 {s.n_operators}명 × {s.trials}회 = '
+        f'{s.n_parts * s.n_operators * s.trials}개</span></div>'
+    )
+    out.append('<div class="metrics" style="margin-top:12px">')
+    out.append(_metric("%GRR (총변동 대비)", f"{res.pct_grr:.1f}", "%"))
+    if res.pct_grr_tol is not None:
+        out.append(_metric("%GRR (공차 대비)", f"{res.pct_grr_tol:.1f}", "%"))
+    out.append(_metric("구별 범주 수 ndc", f"{res.ndc}"))
+    out.append(_metric("반복성 EV (σ)", _num(res.ev)))
+    out.append(_metric("재현성 AV (σ)", _num(res.av)))
+    out.append("</div>")
+    out.append('<ul class="reasons">' + "".join(f"<li>{esc(r)}</li>" for r in reasons)
+               + "</ul>")
+    out.append(
+        '<p class="note">판정 기준 (AIAG MSA): %GRR 10% 미만 적합 · 10~30% 조건부 · '
+        '30% 초과 부적합, ndc 5 이상. 연구변동 = 6σ.</p></div>'
+    )
+
+    # 분산 성분 표
+    headers = ["", "성분", "σ", "6σ", "%기여도", "%연구변동"]
+    if res.tolerance:
+        headers.append("%공차")
+    rows = []
+    for name, var in res.components():
+        sd = math.sqrt(var)
+        r = ["", name.strip(), _num(sd), _num(6 * sd),
+             _pct(res.pct_contribution(var)), _pct(res.pct_study(var))]
+        if res.tolerance:
+            r.append(_pct(res.pct_tolerance(var)))
+        rows.append(r)
+    out.append('<div class="card"><h2>분산 성분</h2>')
+    out.append(_table(headers, rows))
+    out.append("</div>")
+
+    # 그래프
+    out.append('<div class="card"><h2>그래프</h2>')
+    out.append(gagerr.legend_html(s))
+    out.append('<div class="grid2">')
+    charts = [
+        ("변동 성분 — 게이지 R&R 막대가 낮을수록 좋다", gagerr.components_svg(res)),
+        ("측정값 — 부품별 (가로선 = 부품 평균)", gagerr.by_part_svg(s)),
+        ("R 관리도 — 점이 UCL 안에 있어야 한다", gagerr.r_chart_svg(s)),
+        ("X̄ 관리도 — 점이 한계 밖에 많을수록 좋다", gagerr.xbar_chart_svg(s)),
+        ("측정자×부품 — 선이 나란하면 교호작용이 없다", gagerr.interaction_svg(s)),
+    ]
+    for cap, svg in charts:
+        out.append(f'<div class="cell"><div class="cap">{esc(cap)}</div>{svg}</div>')
+    out.append("</div></div>")
+
+    # ANOVA 표
+    out.append('<div class="card"><h2>ANOVA 표</h2>')
+    out.append(_table(
+        ["", "요인", "자유도", "SS", "MS", "F", "p"],
+        [["", r.source, str(r.df), _num(r.ss),
+          "" if math.isnan(r.ms) else _num(r.ms),
+          "" if r.f is None else ("∞" if math.isinf(r.f) else f"{r.f:.4g}"),
+          "" if r.p is None or math.isnan(r.p) else f"{r.p:.3f}"]
+         for r in res.anova],
+    ))
+    if res.interaction_pooled:
+        out.append(
+            f'<p class="note">부품×측정자 교호작용 p = {res.interaction_p:.3f} '
+            f'(> α) 이라 오차에 합쳐서 계산했습니다.</p>'
+        )
+    else:
+        out.append(
+            f'<p class="note">부품×측정자 교호작용 p = {res.interaction_p:.3f} — '
+            '측정자에 따라 부품을 다르게 재고 있습니다. 측정 방법(위치·방향·힘)을 '
+            '통일했는지 확인하세요.</p>'
+        )
+    out.append("</div>")
+
+    # 평균·범위 법
+    if xr is not None:
+        rows = [["", "반복성 EV", _num(xr.ev), _pct(xr.pct_study(xr.var_ev))],
+                ["", "재현성 AV", _num(xr.av), _pct(xr.pct_study(xr.var_av))],
+                ["", "게이지 R&R", _num(xr.grr), _pct(xr.pct_grr)],
+                ["", "부품간 PV", _num(xr.pv), _pct(xr.pct_study(xr.pv ** 2))],
+                ["", "총변동 TV", _num(xr.tv), "100.00"]]
+        out.append('<div class="card"><h2>참고 — 평균·범위 법 (AIAG 양식)</h2>')
+        out.append(_table(["", "성분", "σ", "%연구변동"], rows))
+        out.append(
+            f'<p class="note">ndc = {xr.ndc}. 손계산·엑셀 양식과 맞춰볼 때 쓰세요. '
+            '교호작용을 분리하지 못하므로 판정은 ANOVA 법을 따릅니다.</p></div>'
+        )
+    return "".join(out)
+
+
+def render_gagerr_page(query: dict[str, list[str]], hosted: bool = False) -> str:
+    first_visit = "data" not in query
+    data = gagerr.EXAMPLE_CSV if first_visit else query.get("data", [""])[0]
+    lsl_txt = (str(gagerr.EXAMPLE_LSL) if first_visit
+               else (query.get("lsl", [""])[0] or "").strip())
+    usl_txt = (str(gagerr.EXAMPLE_USL) if first_visit
+               else (query.get("usl", [""])[0] or "").strip())
+    alpha_txt = (query.get("alpha", ["0.05"])[0] or "0.05").strip()
+    psd_txt = (query.get("process_sd", [""])[0] or "").strip()
+
+    try:
+        lsl = _opt_float(query, "lsl") if not first_visit else gagerr.EXAMPLE_LSL
+        usl = _opt_float(query, "usl") if not first_visit else gagerr.EXAMPLE_USL
+        alpha = _opt_float(query, "alpha") or 0.05
+        if not 0 < alpha < 1:
+            raise ValueError("교호작용 기준 α 는 0 과 1 사이여야 합니다.")
+        psd = _opt_float(query, "process_sd")
+        if psd is not None and psd <= 0:
+            raise ValueError("공정 표준편차는 0 보다 커야 합니다.")
+        if (lsl is None) != (usl is None):
+            raise ValueError("공차를 쓰려면 하한(LSL)과 상한(USL)을 둘 다 넣으세요.")
+        tol = gagerr._tolerance(lsl, usl, None)
+        study = gagerr.parse_table(data)
+        res = gagerr.anova_method(study, tol, alpha, psd)
+        try:
+            xr: Optional[gagerr.GageResult] = gagerr.xbar_r_method(study, tol, psd)
+        except ValueError:
+            xr = None
+        body = render_gagerr_results(res, xr)
+    except ValueError as exc:
+        body = f'<div class="msg err"><b>계산할 수 없습니다.</b><br>{esc(exc)}</div>'
+
+    if first_visit:
+        body = (
+            '<div class="msg warn">예제 데이터(임펠러 외경 Ø250 ±0.05 mm)로 계산한 '
+            '결과입니다. 내 데이터를 붙여넣고 \'계산\' 을 누르세요.</div>' + body
+        )
+
+    form = f"""<form method="get" action="/gagerr">
+<fieldset><legend>측정 데이터</legend>
+<label><textarea name="data" spellcheck="false">{esc(data)}</textarea></label>
+</fieldset>
+<fieldset><legend>규격 (선택)</legend>
+<label><span class="t">규격 하한 LSL</span>
+<input type="text" inputmode="decimal" name="lsl" value="{esc(lsl_txt)}"></label>
+<label><span class="t">규격 상한 USL</span>
+<input type="text" inputmode="decimal" name="usl" value="{esc(usl_txt)}">
+<span class="hint">비워두면 %공차 없이 총변동 대비로만 판정</span></label>
+</fieldset>
+<fieldset><legend>고급</legend>
+<label><span class="t">공정 표준편차 σ (선택)</span>
+<input type="text" inputmode="decimal" name="process_sd" value="{esc(psd_txt)}">
+<span class="hint">시료가 공정 산포를 대표하지 못할 때. 넣으면 총변동 대신 씀</span></label>
+<label><span class="t">교호작용 합침 기준 α</span>
+<input type="text" inputmode="decimal" name="alpha" value="{esc(alpha_txt)}">
+<span class="hint">p 값이 이보다 크면 교호작용을 오차에 합침 (Minitab 기본 0.05)</span></label>
+</fieldset>
+<button type="submit">계산</button>
+</form>{GAGERR_GUIDE}"""
+
+    quit_button = (
+        "" if hosted
+        else '<a class="quit" href="/quit" title="프로그램을 완전히 끝냅니다">종료</a>'
+    )
+    return f"""<!doctype html>
+<html lang="ko"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>게이지 R&amp;R</title>
+<style>{STYLE}</style>
+</head><body>
+<div class="wrap">
+  <aside id="inputs" style="flex-basis:340px"><div class="card">{form}</div></aside>
+  <main>
+    {nav_html("gagerr")}
+    <div class="head">
+      <div>
+        <h1>게이지 R&amp;R — 측정시스템 분석</h1>
+        <p class="sub">측정기가 제품 차이를 가를 만큼 믿을 만한지 봅니다.
+        (AIAG MSA 4판, ANOVA 법)</p>
+      </div>
+      {quit_button}
+    </div>
+    {body}
+  </main>
+</div>
+<a class="jump" href="#inputs">데이터 고치기 ↓</a>
 </body></html>"""
 
 
@@ -627,7 +907,10 @@ class _Handler(BaseHTTPRequestHandler):
 
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         try:
-            page = render_page(query)
+            if parsed.path.rstrip("/") == "/gagerr":
+                page = render_gagerr_page(query)
+            else:
+                page = render_page(query)
         except Exception as exc:  # 어떤 오류든 화면에 보여준다
             page = (
                 "<!doctype html><meta charset='utf-8'>"

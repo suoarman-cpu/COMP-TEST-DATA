@@ -153,3 +153,13 @@ def test_password_from_environment(monkeypatch) -> None:
     env_app = create_app()
     assert call(env_app, auth=basic("myid", "환경변수비번"))[0].startswith("200")
     assert call(env_app, auth=basic(DEFAULT_USER, "환경변수비번"))[0].startswith("401")
+
+
+def test_gagerr_page_needs_login_and_works(app) -> None:
+    status, _, _ = call(app, path="/gagerr")
+    assert status.startswith("401")
+    status, _, body = call(app, auth=basic(DEFAULT_USER, PASSWORD), path="/gagerr")
+    text = body.decode()
+    assert status.startswith("200")
+    assert "게이지 R&amp;R" in text and "분산 성분" in text
+    assert "/quit" not in text

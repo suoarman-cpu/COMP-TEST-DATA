@@ -32,6 +32,7 @@ MODULES = [
     "retrofit",
     "report",
     "svg",
+    "gagerr",
     "webui",
 ]
 
@@ -57,6 +58,7 @@ class _SelfModule:
 
 
 props = _SelfModule()
+gagerr = _SelfModule()
 """
 
 HEADER = '''"""터보 냉동기 사이클 해석 — 파일 하나로 합친 배포판.
@@ -67,6 +69,8 @@ HEADER = '''"""터보 냉동기 사이클 해석 — 파일 하나로 합친 배
     화면으로 보기 :  python 터보냉동기_사이클해석.py
                      (브라우저가 자동으로 열린다)
     계산만 찍기   :  python 터보냉동기_사이클해석.py --text
+    게이지 R&R    :  화면 위쪽 '게이지 R&R' 메뉴, 또는
+                     python 터보냉동기_사이클해석.py --gagerr 데이터.csv --lsl .. --usl ..
 
 설치할 것은 하나뿐이다
     pip install CoolProp
@@ -84,6 +88,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 import sys
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Optional, Sequence
@@ -193,7 +198,22 @@ def _main() -> None:
     parser.add_argument("--stages", type=int, choices=(1, 2), default=2, help="압축 단수")
     parser.add_argument("--t-evap", type=float, help="증발온도 [°C]")
     parser.add_argument("--t-cond", type=float, help="응축온도 [°C]")
+    parser.add_argument(
+        "--gagerr", metavar="CSV", nargs="?", const="",
+        help="게이지 R&R 을 글자로 계산 (CSV 를 안 주면 예제). "
+             "공차는 --lsl/--usl 로",
+    )
+    parser.add_argument("--lsl", type=float, help="게이지 R&R 규격 하한")
+    parser.add_argument("--usl", type=float, help="게이지 R&R 규격 상한")
     args = parser.parse_args()
+
+    if args.gagerr is not None:
+        gargs = [args.gagerr] if args.gagerr else []
+        if args.lsl is not None:
+            gargs += ["--lsl", str(args.lsl)]
+        if args.usl is not None:
+            gargs += ["--usl", str(args.usl)]
+        sys.exit(main(gargs))
 
     if args.text:
         inp = CycleInput(
