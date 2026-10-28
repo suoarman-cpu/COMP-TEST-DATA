@@ -28,7 +28,7 @@ l = wb.create_sheet("특허목록")
 for c in L[1]:
     l.cell(1, c.column, c.value)
 for i, r in enumerate(rows, 2):
-    for j, v in enumerate(r[:15], 1):
+    for j, v in enumerate(r[:19], 1):
         l.cell(i, j, v)
 
 H = PatternFill("solid", fgColor="1F4E78")
@@ -36,24 +36,24 @@ G = PatternFill("solid", fgColor="E2EFDA")
 Y = PatternFill("solid", fgColor="FFF2CC")
 hf = Font(name="Arial", bold=True, color="FFFFFF")
 nf = Font(name="Arial", size=10)
-widths = [11, 13, 22, 7, 18, 8, 34, 11, 11, 14, 12, 50, 30, 8, 30]
+widths = [11, 13, 22, 7, 18, 8, 34, 11, 11, 14, 12, 50, 30, 8, 30, 11, 24, 48, 40]
 n = len(rows) + 1
 for i, w in enumerate(widths, 1):
     l.column_dimensions[l.cell(1, i).column_letter].width = w
     h = l.cell(1, i)
     h.font = hf
-    h.fill = H if i < 14 else PatternFill("solid", fgColor="BF8F00")
+    h.fill = PatternFill("solid", fgColor="BF8F00") if i in (14, 15) else H
     h.alignment = Alignment(wrap_text=True, vertical="center")
     for r in range(2, n + 1):
         c = l.cell(r, i)
         c.font = nf
         c.alignment = Alignment(wrap_text=True, vertical="top")
-        if i >= 14:
+        if i in (14, 15):
             c.fill = Y
-        elif str(l.cell(r, 1).value) == latest:
+        elif i < 14 and str(l.cell(r, 1).value) == latest:
             c.fill = G
 l.freeze_panes = "C2"
-l.auto_filter.ref = f"A1:O{n}"
+l.auto_filter.ref = f"A1:S{n}"
 s["A1"].font = Font(name="Arial", bold=True, size=12)
 s.column_dimensions["A"].width = 14
 for j in range(1, 14):
