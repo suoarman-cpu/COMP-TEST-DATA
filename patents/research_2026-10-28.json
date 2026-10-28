@@ -1,0 +1,766 @@
+{
+ "access": {
+  "patents.google.com/patent/US12516678B2/en": {
+   "http": 503,
+   "비고": "Google 'Sorry...' 차단 페이지 반환(최초 접속 확인 시)"
+  },
+  "https://www.kipris.or.kr": {
+   "http": null,
+   "비고": "curl 000, Connection reset by peer(프록시 경유 연결 거부). 우회 시도 안 함"
+  },
+  "https://kpat.kipris.or.kr": {
+   "http": null,
+   "비고": "curl 000, Connection reset by peer. 우회 시도 안 함"
+  },
+  "비고": "Google Patents는 간헐 차단: 같은 번호도 재시도 시 읽히는 경우가 있어 fetch_patent.py로 여러 차례 재시도. User-Agent 위조 등 우회는 하지 않음"
+ },
+ "existing": [
+  {
+   "번호": "WO2026024384A1",
+   "링크": "https://patents.google.com/patent/WO2026024384A1/en",
+   "PDF": null,
+   "출원일": "2025-06-17",
+   "공개일": "2026-01-29",
+   "등록일": null,
+   "패밀리": [],
+   "등록일_사유": "2026-10-28 기준 Google Patents 상태 Pending(미등록)",
+   "패밀리_사유": "Also Published As 구역 비어 있음, Publications 구역은 본건뿐(KR·US 대응 번호 확인 안 됨)",
+   "제목": "Refrigerant compressor including configuration of axial and centrifugal stages",
+   "출원인": "Danfoss AS",
+   "우선일": "2024-07-23"
+  },
+  {
+   "번호": "JP2026061434A",
+   "링크": "https://patents.google.com/patent/JP2026061434A/en",
+   "PDF": null,
+   "출원일": "2024-09-30",
+   "공개일": "2026-04-09",
+   "등록일": null,
+   "패밀리": [
+    {
+     "번호": "EP4752376A1",
+     "링크": "https://patents.google.com/patent/EP4752376A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2026069845A1",
+     "링크": "https://patents.google.com/patent/WO2026069845A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일_사유": "Google Patents 상태 정보에 등록 이벤트 없음(공개만 확인)",
+   "패밀리_사유": "KR·US 대응 번호는 Also Published As에 없음(EP, WO만 확인)",
+   "제목": "Turbo compressors and refrigerators",
+   "출원인": "Daikin Industries Ltd"
+  },
+  {
+   "번호": "US12584521B2",
+   "링크": "https://patents.google.com/patent/US12584521B2/en",
+   "PDF": null,
+   "출원일": "2023-07-31",
+   "공개일": "2025-02-06",
+   "등록일": "2026-03-24",
+   "패밀리": [
+    {
+     "번호": "EP4530489A1",
+     "링크": "https://patents.google.com/patent/EP4530489A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20250043821A1",
+     "링크": "https://patents.google.com/patent/US20250043821A1/en",
+     "PDF": null
+    }
+   ],
+   "공개일_비고": "공개일=US20250043821A1 공개일(2025-02-06). 등록공보 US12584521B2는 2026-03-24",
+   "제목": "Hybrid airfoil bearing with active damping",
+   "출원인": "Hamilton Sundstrand Corp",
+   "패밀리_사유": "KR 대응 번호는 확인 안 됨"
+  },
+  {
+   "번호": "WO2025226066A1",
+   "링크": "https://patents.google.com/patent/WO2025226066A1/en",
+   "PDF": null,
+   "출원일": "2025-04-24",
+   "공개일": "2025-10-30",
+   "등록일": null,
+   "패밀리": [
+    {
+     "번호": "KR102967327B1",
+     "링크": "https://patents.google.com/patent/KR102967327B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20250157071A",
+     "링크": "https://patents.google.com/patent/KR20250157071A/en",
+     "PDF": null
+    }
+   ],
+   "등록일_사유": "WO는 등록 개념 없음. 국내 KR102967327B1 공개일(공보 발행) 2026-05-20, 출원일 2024-04-26(우선일)",
+   "제목": "Journal foil air bearing for bidirectional rotation",
+   "출원인": "Tne Korea Co ltd, Valeo Pyeong HWA Co Ltd",
+   "우선일": "2024-04-26",
+   "패밀리_사유": "US 대응 번호는 확인 안 됨"
+  },
+  {
+   "번호": "US20240247686A1",
+   "링크": "https://patents.google.com/patent/US20240247686A1/en",
+   "PDF": "https://patentimages.storage.googleapis.com/1f/31/7d/2e7468c9c94072/US20240247686A1.pdf",
+   "출원일": "2024-01-02",
+   "공개일": "2024-07-25",
+   "등록일": "2026-04-14",
+   "패밀리": [
+    {
+     "번호": "CN118375627A",
+     "링크": "https://patents.google.com/patent/CN118375627A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12601373B2",
+     "링크": "https://patents.google.com/patent/US12601373B2/en",
+     "PDF": null
+    }
+   ],
+   "등록번호": "US12601373B2",
+   "제목": "Refrigerant compressor including grooved auxiliary bearing interface",
+   "출원인": "Danfoss AS"
+  },
+  {
+   "번호": "US12180974B2",
+   "링크": "https://patents.google.com/patent/US12180974B2/en",
+   "PDF": "https://patentimages.storage.googleapis.com/29/fa/87/a0ef1767423ad3/US12180974.pdf",
+   "출원일": "2022-03-24",
+   "공개일": "2023-09-28",
+   "등록일": "2024-12-31",
+   "패밀리": [
+    {
+     "번호": "CN118900955A",
+     "링크": "https://patents.google.com/patent/CN118900955A/en",
+     "PDF": null
+    },
+    {
+     "번호": "DE112023001556T5",
+     "링크": "https://patents.google.com/patent/DE112023001556T5/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2025509236A",
+     "링크": "https://patents.google.com/patent/JP2025509236A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR102946432B1",
+     "링크": "https://patents.google.com/patent/KR102946432B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20240162503A",
+     "링크": "https://patents.google.com/patent/KR20240162503A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12404873B2",
+     "링크": "https://patents.google.com/patent/US12404873B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20230304508A1",
+     "링크": "https://patents.google.com/patent/US20230304508A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20240401608A1",
+     "링크": "https://patents.google.com/patent/US20240401608A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2023183694A1",
+     "링크": "https://patents.google.com/patent/WO2023183694A1/en",
+     "PDF": null
+    }
+   ],
+   "공개일_비고": "공개일=US20230304508A1 공개일. 등록공보 US12180974B2는 2024-12-31",
+   "제목": "Variable inlet guide vane apparatus and compressor including same",
+   "출원인": "Copeland LP"
+  },
+  {
+   "번호": "US11193529B2",
+   "링크": "https://patents.google.com/patent/US11193529B2/en",
+   "PDF": "https://patentimages.storage.googleapis.com/91/36/37/279ed99a447f51/US11193529.pdf",
+   "출원일": "2020-03-09",
+   "공개일": "2020-09-17",
+   "등록일": "2021-12-07",
+   "패밀리": [
+    {
+     "번호": "EP3708846A1",
+     "링크": "https://patents.google.com/patent/EP3708846A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP3708846B1",
+     "링크": "https://patents.google.com/patent/EP3708846B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR102283021B1",
+     "링크": "https://patents.google.com/patent/KR102283021B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20200110056A",
+     "링크": "https://patents.google.com/patent/KR20200110056A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20200291987A1",
+     "링크": "https://patents.google.com/patent/US20200291987A1/en",
+     "PDF": null
+    }
+   ],
+   "공개일_비고": "공개일=US20200291987A1 공개일",
+   "제목": "Thrust bearing for turbo compressor",
+   "출원인": "LG Electronics Inc"
+  },
+  {
+   "번호": "US11009043B2",
+   "링크": "https://patents.google.com/patent/US11009043B2/en",
+   "PDF": "https://patentimages.storage.googleapis.com/14/45/7a/6e12453157ce65/US11009043.pdf",
+   "출원일": "2017-11-07",
+   "공개일": "2019-02-14",
+   "등록일": "2021-05-18",
+   "패밀리": [
+    {
+     "번호": "CN109072928A",
+     "링크": "https://patents.google.com/patent/CN109072928A/en",
+     "PDF": null
+    },
+    {
+     "번호": "CN109072928B",
+     "링크": "https://patents.google.com/patent/CN109072928B/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2019515194A",
+     "링크": "https://patents.google.com/patent/JP2019515194A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP6632763B2",
+     "링크": "https://patents.google.com/patent/JP6632763B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR101845833B1",
+     "링크": "https://patents.google.com/patent/KR101845833B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20190048893A1",
+     "링크": "https://patents.google.com/patent/US20190048893A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2018097511A1",
+     "링크": "https://patents.google.com/patent/WO2018097511A1/en",
+     "PDF": null
+    }
+   ],
+   "공개일_비고": "공개일=US20190048893A1 공개일",
+   "제목": "Turbo compressor including intercooler",
+   "출원인": "Tne Korea Co Ltd"
+  },
+  {
+   "번호": "KR101705784B1",
+   "링크": "https://patents.google.com/patent/KR101705784B1/en",
+   "PDF": "https://patentimages.storage.googleapis.com/6a/f0/1f/0453efc622652d/KR101705784B1.pdf",
+   "출원일": "2015-04-23",
+   "공개일": "2016-11-02",
+   "등록일": "2017-02-13",
+   "패밀리": [
+    {
+     "번호": "KR20160126496A",
+     "링크": "https://patents.google.com/patent/KR20160126496A/en",
+     "PDF": null
+    }
+   ],
+   "공개일_비고": "공개일=KR20160126496A 공개일. 등록공보(KR101705784B1)는 2017-02-13",
+   "제목": "축하중 저감 구조를 갖는 터보블로어 (Turbo blower having a structure for reducing an axial load)",
+   "출원인": "(주) 터보맥스",
+   "초록": "임펠러 측으로 작용하는 축방향 하중을 줄이는 구조의 터보블로어. 냉각팬과 주변 공간 설계를 바꿔, 냉각팬 회전 시 전·후방 압력차로 회전축을 후방으로 미는 힘이 최대가 되게 한다.",
+   "대표청구항_요지": "중공 케이싱, 전단에 임펠러가 결합된 회전축, 회전축 후단에 결합되고 디스크 전면·후면에 블레이드가 있는 냉각팬을 포함하며, 디스크 전면 블레이드가 후면 블레이드보다 높이가 낮은 것을 특징으로 하는 터보블로어. 종속항: 디스크 외주와 마주하는 부재에 클리어런스 조절부, 전면 블레이드가 후면 블레이드보다 길이가 긴 구성, 후면 블레이드가 만든 압력공기 유로와 디스크 전면 공간을 잇는 우회 유로."
+  }
+ ],
+ "new": [
+  {
+   "번호": "US12516678B2",
+   "국가": "US",
+   "업체": "코플랜드",
+   "출원인": "Copeland LP",
+   "구분": "등록",
+   "제목": "Variable inlet guide vane apparatus combined with compressor end cap",
+   "공개일": "2026-01-06",
+   "출원일": "2023-03-20",
+   "설계분야": "기타",
+   "용도": "냉매(칠러)",
+   "핵심내용": "컴프레서 엔드캡과 결합된 가변 입구안내깃(VIGV) 장치. 엔드캡 환형 측벽·플랜지·내벽과 하우징부가 유로와 베인 개구를 형성하고, 링기어와 각 베인의 베인기어가 맞물려 베인 각도를 조절한다. 흡입구에 예선회(pre-swirl)를 부여하는 구조.",
+   "링크": "https://patents.google.com/patent/US12516678B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN120826536A",
+     "링크": "https://patents.google.com/patent/CN120826536A/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4684137A1",
+     "링크": "https://patents.google.com/patent/EP4684137A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026507248A",
+     "링크": "https://patents.google.com/patent/JP2026507248A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20250135310A",
+     "링크": "https://patents.google.com/patent/KR20250135310A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20240318659A1",
+     "링크": "https://patents.google.com/patent/US20240318659A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260117792A1",
+     "링크": "https://patents.google.com/patent/US20260117792A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2024196641A1",
+     "링크": "https://patents.google.com/patent/WO2024196641A1/en",
+     "PDF": null
+    }
+   ],
+   "pdf_사유": "Google 페이지에서 PDF 링크 미확인",
+   "공개일_비고": "공개일=등록공보 US12516678B2 발행일(2026-01-06). A1(US20240318659A1)은 2024-09-26",
+   "등록일": "2026-01-06"
+  },
+  {
+   "번호": "US20260098537A1",
+   "국가": "US",
+   "업체": "기타",
+   "출원인": "Tyco Fire and Security GmbH",
+   "구분": "공개",
+   "제목": "Compressor with optimized interstage flow inlet",
+   "공개일": "2026-04-09",
+   "출원일": "2025-12-11",
+   "설계분야": "디퓨저·볼류트",
+   "용도": "냉매(칠러)",
+   "핵심내용": "1·2단 임펠러/디퓨저 사이 단간(interstage)부에 지향 베인 조립체, 이를 둘러싼 집합 유로(collector), 둘을 잇는 원주 방향 삽입 슬롯을 둔 2단 원심 압축기. 단간 유동의 유입을 최적화하는 구조이며 칠러 어셈블리 실시예를 포함.",
+   "링크": "https://patents.google.com/patent/US20260098537A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN114375370A",
+     "링크": "https://patents.google.com/patent/CN114375370A/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4013966A1",
+     "링크": "https://patents.google.com/patent/EP4013966A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2022545374A",
+     "링크": "https://patents.google.com/patent/JP2022545374A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2024023518A",
+     "링크": "https://patents.google.com/patent/JP2024023518A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026035610A",
+     "링크": "https://patents.google.com/patent/JP2026035610A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20220062293A",
+     "링크": "https://patents.google.com/patent/KR20220062293A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20250065425A",
+     "링크": "https://patents.google.com/patent/KR20250065425A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20220333602A1",
+     "링크": "https://patents.google.com/patent/US20220333602A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2021030319A1",
+     "링크": "https://patents.google.com/patent/WO2021030319A1/en",
+     "PDF": null
+    }
+   ],
+   "우선일": "2019-08-12"
+  },
+  {
+   "번호": "US12704133B2",
+   "국가": "US",
+   "업체": "기타",
+   "출원인": "Mitsubishi Heavy Industries Thermal Systems Ltd",
+   "구분": "등록",
+   "제목": "Turbo compressor and turbo chiller comprising same",
+   "공개일": "2026-01-29",
+   "출원일": "2022-10-17",
+   "설계분야": "냉각유로",
+   "용도": "냉매(칠러)",
+   "핵심내용": "임펠러·축·전동기·케이싱과 자기베어링을 가진 터보 압축기에서, 케이싱 외면에 전열판을 붙이고 그 반대면에 자기베어링 구동 기판을 면접촉시킨다. 외부 냉매를 공급받는 냉각부가 전열판에 냉열을 전달해 구동 기판을 냉각.",
+   "링크": "https://patents.google.com/patent/US12704133B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN119585531A",
+     "링크": "https://patents.google.com/patent/CN119585531A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2024021975A",
+     "링크": "https://patents.google.com/patent/JP2024021975A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP7460705B2",
+     "링크": "https://patents.google.com/patent/JP7460705B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260028997A1",
+     "링크": "https://patents.google.com/patent/US20260028997A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2024029097A1",
+     "링크": "https://patents.google.com/patent/WO2024029097A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일": "2026-08-11",
+   "공개일_비고": "공개일=US20260028997A1 공개일(2026-01-29). 등록공보 US12704133B2는 2026-08-11"
+  },
+  {
+   "번호": "US12480547B2",
+   "국가": "US",
+   "업체": "다이킨",
+   "출원인": "Daikin Industries Ltd",
+   "구분": "등록",
+   "제목": "Thrust magnetic bearing with cooling structure",
+   "공개일": "2025-11-25",
+   "출원일": "2023-03-28",
+   "설계분야": "냉각유로",
+   "용도": "기타",
+   "핵심내용": "코일과 이를 수용하는 코어를 가진 스러스트 자기베어링. 코어에 냉매 입구·출구가 있고 코일과 코어 사이에 냉매 유로를 두되 냉매가 코일 권선 방향을 따라 주로 흐르게 하며, 코일-코어 사이에 절연부재를 둔다.",
+   "링크": "https://patents.google.com/patent/US12480547B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN116209836A",
+     "링크": "https://patents.google.com/patent/CN116209836A/en",
+     "PDF": null
+    },
+    {
+     "번호": "CN116209836B",
+     "링크": "https://patents.google.com/patent/CN116209836B/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4202245A1",
+     "링크": "https://patents.google.com/patent/EP4202245A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4202245A4",
+     "링크": "https://patents.google.com/patent/EP4202245A4/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2022055870A",
+     "링크": "https://patents.google.com/patent/JP2022055870A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP7104344B2",
+     "링크": "https://patents.google.com/patent/JP7104344B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20230228297A1",
+     "링크": "https://patents.google.com/patent/US20230228297A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2022071095A1",
+     "링크": "https://patents.google.com/patent/WO2022071095A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일": "2025-11-25",
+   "용도_비고": "원문은 터보 압축기 실시예에 냉매 사용. 칠러/히트펌프 구분 명시 없음",
+   "공개일_비고": "공개일=등록공보 발행일. A1(US20230228297A1) 공개 2023-07-20"
+  },
+  {
+   "번호": "US12480514B2",
+   "국가": "US",
+   "업체": "다이킨",
+   "출원인": "Daikin Industries Ltd",
+   "구분": "등록",
+   "제목": "Turbo-type fluid machine and refrigeration apparatus",
+   "공개일": "2025-11-25",
+   "출원일": "2024-01-03",
+   "설계분야": "회전체 구조",
+   "용도": "기타",
+   "핵심내용": "구동 축 단부와 임펠러를 잇는 연결부(coupling portion)에 밸런스 조정 기구를 마련한 터보형 유체기계. 축-임펠러 결합부에서 회전체 밸런스를 조정할 수 있게 한 회전체 구조.",
+   "링크": "https://patents.google.com/patent/US12480514B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN117581024A",
+     "링크": "https://patents.google.com/patent/CN117581024A/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4336047A1",
+     "링크": "https://patents.google.com/patent/EP4336047A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4336047A4",
+     "링크": "https://patents.google.com/patent/EP4336047A4/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2023008179A",
+     "링크": "https://patents.google.com/patent/JP2023008179A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP7269507B2",
+     "링크": "https://patents.google.com/patent/JP7269507B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20240133393A1",
+     "링크": "https://patents.google.com/patent/US20240133393A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20240229812A9",
+     "링크": "https://patents.google.com/patent/US20240229812A9/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2023281932A1",
+     "링크": "https://patents.google.com/patent/WO2023281932A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일": "2025-11-25",
+   "용도_비고": "원문에 refrigeration apparatus·air conditioner 언급. 칠러/히트펌프 구분 명시 없음",
+   "공개일_비고": "공개일=등록공보 발행일. A1(US20240133393A1) 공개 2024-04-25"
+  },
+  {
+   "번호": "US12331786B2",
+   "국가": "US",
+   "업체": "기타",
+   "출원인": "Hanon Systems Corp",
+   "구분": "등록",
+   "제목": "Housing fixing structure of air foil journal bearing",
+   "공개일": "2025-06-17",
+   "출원일": "2021-12-29",
+   "설계분야": "에어포일 베어링",
+   "용도": "차량·연료전지",
+   "핵심내용": "하우징 내면 키홈, 양단이 반경 외측으로 절곡된 탑 포일, 범프 포일의 양단과 탑 포일 고정부로 범프의 축방향 이동을 구속해 외부 충격·진동에 대한 내구성을 높인 에어포일 저널 베어링의 하우징 고정 구조.",
+   "링크": "https://patents.google.com/patent/US12331786B2/en",
+   "PDF": "https://patentimages.storage.googleapis.com/ff/71/3f/5a83ee07434340/US12331786B2.pdf",
+   "패밀리": [
+    {
+     "번호": "CN117062989A",
+     "링크": "https://patents.google.com/patent/CN117062989A/en",
+     "PDF": null
+    },
+    {
+     "번호": "DE112021006899T5",
+     "링크": "https://patents.google.com/patent/DE112021006899T5/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR102946195B1",
+     "링크": "https://patents.google.com/patent/KR102946195B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20220129786A",
+     "링크": "https://patents.google.com/patent/KR20220129786A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20240125357A1",
+     "링크": "https://patents.google.com/patent/US20240125357A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일": "2025-06-17",
+   "공개일_비고": "공개일=등록공보 발행일. A1(US20240125357A1) 공개 2024-04-18"
+  },
+  {
+   "번호": "US12448979B2",
+   "국가": "US",
+   "업체": "기타",
+   "출원인": "Toyota Industries Corp",
+   "구분": "등록",
+   "제목": "Electric turbo compressor",
+   "공개일": "2025-10-21",
+   "출원일": "2022-03-15",
+   "설계분야": "회전체 구조",
+   "용도": "기타",
+   "핵심내용": "하나의 회전축 한쪽에 제1·제2 임펠러를 둔 전동 터보 압축기에서, 제1 임펠러 블레이드 축방향 구간의 회전체 질량이 제2 임펠러 구간보다 크게 되도록 한 회전체 질량 배분 구조. 모터실로 냉매를 도입하는 냉매 압축기.",
+   "링크": "https://patents.google.com/patent/US12448979B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN117716133A",
+     "링크": "https://patents.google.com/patent/CN117716133A/en",
+     "PDF": null
+    },
+    {
+     "번호": "DE112022004553T5",
+     "링크": "https://patents.google.com/patent/DE112022004553T5/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2023046876A",
+     "링크": "https://patents.google.com/patent/JP2023046876A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP7593279B2",
+     "링크": "https://patents.google.com/patent/JP7593279B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20240045313A",
+     "링크": "https://patents.google.com/patent/KR20240045313A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20250003414A1",
+     "링크": "https://patents.google.com/patent/US20250003414A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일": "2025-10-21",
+   "용도_비고": "원문은 냉매 압축기. 칠러/히트펌프 구분 명시 없음",
+   "공개일_비고": "공개일=등록공보 발행일. A1(US20250003414A1) 공개 2025-01-02"
+  },
+  {
+   "번호": "KR20260002320A",
+   "국가": "KR",
+   "업체": "기타",
+   "출원인": "오정환",
+   "구분": "공개",
+   "제목": "Aero Magnetic Turbo Blower",
+   "공개일": "2026-01-06",
+   "출원일": "2025-10-24",
+   "설계분야": "기타 베어링",
+   "용도": "공기(블로어)",
+   "핵심내용": "기계식 증기 재압축(MVR)·진공용 터보블로워에서 스러스트는 마그네틱 베어링, 저널은 동압 공기베어링으로 지지. 임펠러 반대쪽 후방 스러스트 디스크에 쿨링팬을 두어 회전자 과열을 방지하고 자중에 의한 축하중을 줄인다.",
+   "링크": "https://patents.google.com/patent/KR20260002320A/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "KR102953389B1",
+     "링크": "https://patents.google.com/patent/KR102953389B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20240160839A",
+     "링크": "https://patents.google.com/patent/KR20240160839A/en",
+     "PDF": null
+    }
+   ],
+   "우선일": "2023-05-03",
+   "용도_비고": "증기(vapor) 압축용 블로워"
+  },
+  {
+   "번호": "EP4226049B1",
+   "국가": "EP",
+   "업체": "기타",
+   "출원인": "Mirai Intex SAGL",
+   "구분": "등록",
+   "제목": "Turbo compressor assembly of a cooling machine",
+   "공개일": "2026-01-28",
+   "출원일": "2021-09-10",
+   "설계분야": "시스템",
+   "용도": "기타",
+   "핵심내용": "압축기·전동기·터보익스팬더를 공통 하우징에 두고 하나의 축을 가스베어링으로 지지, 압축기 임펠러와 터빈 임펠러를 축 양끝에 전동기 회전자를 가운데 배치한 냉각기용 터보 압축기 조립체.",
+   "링크": "https://patents.google.com/patent/EP4226049B1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CZ2020548A3",
+     "링크": "https://patents.google.com/patent/CZ2020548A3/en",
+     "PDF": null
+    },
+    {
+     "번호": "CZ308973B6",
+     "링크": "https://patents.google.com/patent/CZ308973B6/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4226049A1",
+     "링크": "https://patents.google.com/patent/EP4226049A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2023553578A",
+     "링크": "https://patents.google.com/patent/JP2023553578A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP7819948B2",
+     "링크": "https://patents.google.com/patent/JP7819948B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12173722B2",
+     "링크": "https://patents.google.com/patent/US12173722B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20230407873A1",
+     "링크": "https://patents.google.com/patent/US20230407873A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2022073718A1",
+     "링크": "https://patents.google.com/patent/WO2022073718A1/en",
+     "PDF": null
+    }
+   ],
+   "등록일": "2026-01-28",
+   "용도_비고": "원문에 cooling machine, refrigeration, heat pump 언급. 작동유체 가스(냉매 아님 가능)",
+   "공개일_비고": "공개일=등록공보 발행일. A1(EP4226049A1) 공개 2023-08-16"
+  }
+ ],
+ "notes": [
+  "PDF 링크: PDF 링크는 해당 번호의 Google Patents 페이지를 읽었을 때 페이지에 PDF 링크가 있는 경우만 기재(없거나 페이지 미조회는 null)",
+  "신규는 원문(Google Patents) 확인 건만 수록. 이번 실행에서 10건 미만이면 부족분은 notes에 사유 기재.",
+  "US12601373B2(Danfoss, 2026-04-14 등록)는 기존 US20240247686A1과 같은 패밀리라 신규에서 제외. US12584521B2·JP2026061434A·WO2025226066A1·KR102967327B1도 기존 건/패밀리라 제외.",
+  "US12729691B2(터보 압축기), US12729690B2, US12612923B2는 Google Patents가 반복 차단되어 원문 미확인 → 미수록."
+ ]
+}
