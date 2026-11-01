@@ -207,11 +207,120 @@
    "링크": "https://patents.google.com/patent/KR102973084B1/en",
    "PDF": null,
    "패밀리": []
+  },
+  {
+   "번호": "US20260194071A1",
+   "국가": "US",
+   "업체": "코플랜드",
+   "출원인": "Copeland LP",
+   "구분": "공개",
+   "제목": "Cooling circuits for compressors and compressors including same",
+   "공개일": "2026-07-09",
+   "출원일": "2026-02-19",
+   "등록일": null,
+   "설계분야": "냉각유로",
+   "용도": "냉매(칠러)",
+   "핵심내용": "압축기 하우징에 제1·제2 냉매(냉각재) 유입통로와 모터를 감싸는 냉각채널을 형성. 냉각채널을 제1부(제1유입→제1출구)와 제2부(제2유입→제2출구)로 나눠 모터 둘레를 분할 냉각하는 하우징 일체형 냉각회로 구조.",
+   "링크": "https://patents.google.com/patent/US20260194071A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN122345114A",
+     "링크": "https://patents.google.com/patent/CN122345114A/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4772754A1",
+     "링크": "https://patents.google.com/patent/EP4772754A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026119068A",
+     "링크": "https://patents.google.com/patent/JP2026119068A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20260110897A",
+     "링크": "https://patents.google.com/patent/KR20260110897A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12692877B2",
+     "링크": "https://patents.google.com/patent/US12692877B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260194070A1",
+     "링크": "https://patents.google.com/patent/US20260194070A1/en",
+     "PDF": null
+    }
+   ]
+  },
+  {
+   "번호": "WO2026164920A1",
+   "국가": "WO",
+   "업체": "댄포스",
+   "출원인": "Danfoss A/S",
+   "구분": "공개",
+   "제목": "Centrifugal refrigerant compressor including check valve",
+   "공개일": "2026-08-06",
+   "출원일": "2026-01-23",
+   "등록일": null,
+   "설계분야": "디퓨저·볼류트",
+   "용도": "냉매(칠러)",
+   "핵심내용": "볼류트 하류 출구에 인접한 볼류트 직선구간 내부(하우징 안)에 체크밸브를 내장해, 토출은 허용하고 출구로부터의 역류는 차단. 별도 외부 체크밸브 없이 정지·서지 시 역류·역회전 방지 구조.",
+   "링크": "https://patents.google.com/patent/WO2026164920A1/en",
+   "PDF": null,
+   "패밀리": []
+  },
+  {
+   "번호": "EP4772753A1",
+   "국가": "EP",
+   "업체": "코플랜드",
+   "출원인": "Copeland LP",
+   "구분": "공개",
+   "제목": "Centrifugal compressor with controlled tolerance stack and methods of assembling the same",
+   "공개일": "2026-07-08",
+   "출원일": "2026-01-05",
+   "등록일": null,
+   "설계분야": "회전체 구조",
+   "용도": "냉매(칠러)",
+   "핵심내용": "하우징 기준면(datum)에 베어링하우징과 볼류트 어셈블리를 각각 고정하고, 볼류트 후면 축방향 면에 돌출 스톱을 둬 datum에 맞닿게 해 베어링하우징-볼류트 간 공차 누적을 제한. 핏밴드로 하우징-베어링하우징 정렬(임펠러 팁 간극 관리).",
+   "링크": "https://patents.google.com/patent/EP4772753A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN122343364A",
+     "링크": "https://patents.google.com/patent/CN122343364A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026119753A",
+     "링크": "https://patents.google.com/patent/JP2026119753A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20260110872A",
+     "링크": "https://patents.google.com/patent/KR20260110872A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260194072A1",
+     "링크": "https://patents.google.com/patent/US20260194072A1/en",
+     "PDF": null
+    }
+   ]
   }
  ],
  "notes": [
   "KIPRIS_API_KEY 환경변수가 없어 KIPRIS 조회는 수행하지 않음.",
   "최근 2주 공개분이 Google Patents에 아직 색인되지 않아, 2025-10 이후 공개·등록 건 중 최신순으로 선정.",
-  "PDF는 Google 페이지에 patentimages PDF 링크가 있을 때만 기재(없으면 null). 패밀리 PDF는 개별 페이지 미조회로 null."
+  "PDF는 Google 페이지에 patentimages PDF 링크가 있을 때만 기재(없으면 null). 패밀리 PDF는 개별 페이지 미조회로 null.",
+  "US12729691B2·우선 확인: US12729691B2, US12612923B2는 Google Patents가 HTTP 404(페이지 없음) 반환, US12729690B2는 'Sorry...' 차단 → 3건 모두 원문 미확인으로 미수록.",
+  "원문 확인 시도 후보 15건: 위 3건 + WO2026169685A1, KR20260093516A, KR20260092920A, US20260194071A1, JP7872642B2, KR20260101386A, US12663023B2, KR102973084B1, EP4772753A1, WO2026164920A1, DE102026104755A1. 이 중 10건 원문 확인·선정, DE102026104755A1(Copeland, Flexible bearing housing)은 차단으로 미확인.",
+  "Denso·터보맥스(TurboMAX)는 검색 차단/결과 없음으로 이번 회차 신규 후보 없음.",
+  "US20260194071A1과 동일 제목의 EP4782694A2(Copeland)가 있으나 Google 페이지 패밀리 목록에 없어 패밀리에 넣지 않음(원문 미조회).",
+  "JP7872642B2 패밀리 KR102738444B1/KR20240057579A는 기존 누적 목록에 없음을 확인.",
+  "이번 회차 신규 건은 공개일 2026-06-04~2026-08-13 범위(2025-10 이후 조건 충족)."
  ]
 }
