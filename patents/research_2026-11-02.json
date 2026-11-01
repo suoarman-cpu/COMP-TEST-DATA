@@ -88,6 +88,125 @@
      "PDF": null
     }
    ]
+  },
+  {
+   "번호": "WO2026169685A1",
+   "국가": "WO",
+   "업체": "댄포스",
+   "출원인": "Danfoss A/S",
+   "구분": "공개",
+   "제목": "Bearing arrangements and cooling schemes for refrigerant compressor",
+   "공개일": "2026-08-13",
+   "출원일": "2026-02-04",
+   "등록일": null,
+   "설계분야": "에어포일 베어링",
+   "용도": "냉매(칠러)",
+   "핵심내용": "전동기 구동 축에 1·2 레이디얼 베어링을 레이디얼 포일 베어링으로 구성하고 축방향 베어링과 함께 오일 없이 냉매로 냉각하는 냉매 압축기 베어링 배치·냉각 방식. 오일프리 칠러 압축기의 포일베어링 적용 및 냉매 냉각 유로 설계 참고.",
+   "링크": "https://patents.google.com/patent/WO2026169685A1/en",
+   "PDF": null,
+   "패밀리": []
+  },
+  {
+   "번호": "KR20260101386A",
+   "국가": "KR",
+   "업체": "LG전자",
+   "출원인": "엘지전자 주식회사",
+   "구분": "공개",
+   "제목": "Compressor and turbo chiller having the same (압축기 및 이를 구비한 터보 칠러)",
+   "공개일": "2026-06-30",
+   "출원일": "2024-12-23",
+   "등록일": null,
+   "설계분야": "디퓨저·볼류트",
+   "용도": "냉매(칠러)",
+   "핵심내용": "2단 임펠러 터보 압축기에서 1단 출구-2단 입구를 잇는 리턴채널(확산공간→집중공간)에 이코노마이저 회수 기상냉매를 주입. 디퓨저 전면에 리턴포트 세트를 원주방향으로 배열하고 각 세트는 반경방향으로 이격된 다수 포트로 구성해 리턴챔버의 냉매를 균일 혼합.",
+   "링크": "https://patents.google.com/patent/KR20260101386A/en",
+   "PDF": null,
+   "패밀리": []
+  },
+  {
+   "번호": "US12663023B2",
+   "국가": "US",
+   "업체": "다이킨",
+   "출원인": "Daikin Industries, Ltd.",
+   "구분": "등록",
+   "제목": "Centrifugal compressor with liquid injection",
+   "공개일": "2026-06-23",
+   "출원일": "2024-10-28",
+   "등록일": "2026-06-23",
+   "설계분야": "디퓨저·볼류트",
+   "용도": "냉매(칠러)",
+   "핵심내용": "2단 원심 칠러에서 2단 디퓨저 주위 원주방향으로 배치되고 1단 디퓨저·리턴채널 유로 중 적어도 하나에도 위치하는 복수 분사포트로 액냉매를 분사. 2단 디퓨저 내 포트는 디퓨저 상류 에지보다 하류에 두어 디퓨저로 액냉매를 공급(토출가스 과열 저감).",
+   "링크": "https://patents.google.com/patent/US12663023B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "AU2022235241A1",
+     "링크": "https://patents.google.com/patent/AU2022235241A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "AU2022235241B2",
+     "링크": "https://patents.google.com/patent/AU2022235241B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "CN117043471A",
+     "링크": "https://patents.google.com/patent/CN117043471A/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4305313A1",
+     "링크": "https://patents.google.com/patent/EP4305313A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2024511734A",
+     "링크": "https://patents.google.com/patent/JP2024511734A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP7758967B2",
+     "링크": "https://patents.google.com/patent/JP7758967B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12158165B2",
+     "링크": "https://patents.google.com/patent/US12158165B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20220290692A1",
+     "링크": "https://patents.google.com/patent/US20220290692A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20250052258A1",
+     "링크": "https://patents.google.com/patent/US20250052258A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2022191067A1",
+     "링크": "https://patents.google.com/patent/WO2022191067A1/en",
+     "PDF": null
+    }
+   ]
+  },
+  {
+   "번호": "KR102973084B1",
+   "국가": "KR",
+   "업체": "티앤이코리아",
+   "출원인": "㈜티앤이코리아",
+   "구분": "등록",
+   "제목": "Gas Cycle Heat Pump Usable as a High-Efficiency Cooler (고효율 냉각기로 사용 가능한 기체 사이클 히트 펌프)",
+   "공개일": "2026-06-04",
+   "출원일": "2025-08-22",
+   "등록일": "2026-06-04",
+   "설계분야": "냉각유로",
+   "용도": "냉매(히트펌프)",
+   "핵심내용": "한 축 양단에 압축 임펠러와 팽창 터빈휠을 둔 모터 직결 기체사이클 히트펌프. 팽창기 흡입기체 일부를 모터 수용공간으로 유입시켜 모터를 냉각한 뒤, 가열된 냉각기체를 임펠러 하류에서 압축기체 유로에 합류시켜 터빈 상류로 열이 돌아가지 않게 해 냉각 효율 확보.",
+   "링크": "https://patents.google.com/patent/KR102973084B1/en",
+   "PDF": null,
+   "패밀리": []
   }
  ],
  "notes": [
