@@ -1,0 +1,98 @@
+{
+ "access": {
+  "KIPRIS Plus Open API": {
+   "http": null,
+   "비고": "환경변수 KIPRIS_API_KEY 없음 → 조회 안 함"
+  },
+  "patents.google.com/patent/<번호>/en": {
+   "비고": "간헐 'Sorry...' 차단(automated queries) 반환. 우회 없이 재시도만"
+  },
+  "patents.google.com/xhr/query": {
+   "비고": "후보 검색에 사용(간헐 차단). 2026-11-01 기준 색인된 최신 공개일이 2026-08 중순까지로 보여, 최근 2주(2026-10-18~) 공개 건은 검색되지 않음"
+  }
+ },
+ "new": [
+  {
+   "번호": "KR20260092920A",
+   "국가": "KR",
+   "업체": "LG전자",
+   "출원인": "엘지전자 주식회사",
+   "구분": "공개",
+   "제목": "Thrust bearing and turbo compressor having the same (스러스트 베어링 및 이를 구비한 터보 압축기)",
+   "공개일": "2026-06-19",
+   "출원일": "2024-12-12",
+   "등록일": null,
+   "설계분야": "에어포일 베어링",
+   "용도": "냉매(칠러)",
+   "핵심내용": "유입구가 있는 베이스플레이트 위에 범프포일, 그 위를 덮는 탑포일에 복수의 정압공급홀을 둬 유입 작동유체를 스러스트러너와의 간극에 공급. 동압+정압을 함께 쓰는 하이브리드 포일 스러스트 베어링(공급헤더로 유입구-정압공급홀 연통)으로 저속·기동 시 부상력 확보.",
+   "링크": "https://patents.google.com/patent/KR20260092920A/en",
+   "PDF": null,
+   "패밀리": []
+  },
+  {
+   "번호": "KR20260093516A",
+   "국가": "KR",
+   "업체": "LG전자",
+   "출원인": "엘지전자 주식회사",
+   "구분": "공개",
+   "제목": "Turbo compressor with motor-integrated dynamic pressure bearing (모터일체형 동압베어링을 구비한 터보 압축기)",
+   "공개일": "2026-06-22",
+   "출원일": "2024-12-12",
+   "등록일": null,
+   "설계분야": "회전체 구조",
+   "용도": "냉매(칠러)",
+   "핵심내용": "모터 로터-스테이터 사이 공극을 회전축 축방향에 대해 경사지게 형성해, 편측 축하중으로 축이 이동하면 경사 공극이 줄어 동압이 발생하는 모터일체형 동압베어링 구성. 전동부 자체가 베어링 하중(축·반경)을 분담해 별도 베어링 부담을 줄임.",
+   "링크": "https://patents.google.com/patent/KR20260093516A/en",
+   "PDF": null,
+   "패밀리": []
+  },
+  {
+   "번호": "JP7872642B2",
+   "국가": "JP",
+   "업체": "티앤이코리아",
+   "출원인": "Tne Korea Co Ltd",
+   "구분": "등록",
+   "제목": "A turbo compressor with the motor located upstream of the compressed gas flow path (모터가 압축기체 유로 상류에 배치된 터보 압축기)",
+   "공개일": "2026-06-10",
+   "출원일": "2023-10-23",
+   "등록일": "2026-06-10",
+   "설계분야": "냉각유로",
+   "용도": "공기(블로어)",
+   "핵심내용": "흡입구(하우징 전단)-모터-임펠러(후단) 순 배치로 흡입기체가 모터를 지나 임펠러로 감. 냉각기로는 ①회전축 외주 경유 ②중공 회전축 내부 경유 ③전단 스러스트베어링 경유(전단 원형공과 축단이 이루는 환형공)로 구성되어 임펠러 흡입력만으로 모터·베어링 냉각.",
+   "링크": "https://patents.google.com/patent/JP7872642B2/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "EP4589150A1",
+     "링크": "https://patents.google.com/patent/EP4589150A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2025533302A",
+     "링크": "https://patents.google.com/patent/JP2025533302A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR102738444B1",
+     "링크": "https://patents.google.com/patent/KR102738444B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20240057579A",
+     "링크": "https://patents.google.com/patent/KR20240057579A/en",
+     "PDF": null
+    },
+    {
+     "번호": "WO2024090928A1",
+     "링크": "https://patents.google.com/patent/WO2024090928A1/en",
+     "PDF": null
+    }
+   ]
+  }
+ ],
+ "notes": [
+  "KIPRIS_API_KEY 환경변수가 없어 KIPRIS 조회는 수행하지 않음.",
+  "최근 2주 공개분이 Google Patents에 아직 색인되지 않아, 2025-10 이후 공개·등록 건 중 최신순으로 선정.",
+  "PDF는 Google 페이지에 patentimages PDF 링크가 있을 때만 기재(없으면 null). 패밀리 PDF는 개별 페이지 미조회로 null."
+ ]
+}
