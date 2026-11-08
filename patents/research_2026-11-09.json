@@ -1,0 +1,50 @@
+{
+ "access": {
+  "KIPRIS Plus Open API": {
+   "http": null,
+   "비고": "환경변수 KIPRIS_API_KEY 없음 → 조회 안 함"
+  },
+  "patents.google.com/patent/<번호>/en": {
+   "비고": "간헐 'Sorry...' 차단 반환. 우회 없이 시간 두고 재시도만"
+  },
+  "patents.google.com/xhr/query": {
+   "비고": "후보 검색에 사용(간헐 차단, 업체명 필터 검색은 차단). 색인된 최신 공개일 2026-08-21 전후"
+  }
+ },
+ "new": [
+  {
+   "번호": "EP4772755A1",
+   "국가": "EP",
+   "업체": "코플랜드",
+   "출원인": "Copeland LP",
+   "구분": "공개",
+   "제목": "Compressor for refrigeration system including internal coolant return line",
+   "공개일": "2026-07-08",
+   "출원일": "2026-01-05",
+   "등록일": null,
+   "설계분야": "냉각유로",
+   "용도": "냉매(칠러)",
+   "핵심내용": "모터실로 들어간 냉각용 냉매를 하우징 내부에 형성한 '내부 냉매 회수 라인'으로 엔드캡의 댐핑 챔버까지 보내고, 댐핑 챔버 출구를 통해 임펠러 상류 흡입유로로 합류시키는 구조. 회수 라인 단면적이 입구→출구로 변하도록 구성(청구항 2). 외부 배관 없이 모터 냉각 냉매를 흡입측으로 되돌림(미국출원 18/186,386의 CIP).",
+   "링크": "https://patents.google.com/patent/EP4772755A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN122345122A",
+     "링크": "https://patents.google.com/patent/CN122345122A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026119055A",
+     "링크": "https://patents.google.com/patent/JP2026119055A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20260111544A",
+     "링크": "https://patents.google.com/patent/KR20260111544A/en",
+     "PDF": null
+    }
+   ]
+  }
+ ],
+ "notes": []
+}
