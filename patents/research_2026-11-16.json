@@ -74,6 +74,211 @@
    "링크": "https://patents.google.com/patent/KR102992396B1/en",
    "PDF": null,
    "패밀리": []
+  },
+  {
+   "번호": "US20260235138A1",
+   "국가": "US",
+   "업체": "기타",
+   "출원인": "Ingersoll Rand Industrial US Inc",
+   "구분": "공개",
+   "제목": "Centrifugal compressor impeller with nonlinear backwall",
+   "공개일": "2026-08-13",
+   "출원일": "2026-04-06",
+   "등록일": null,
+   "설계분야": "임펠러",
+   "용도": "공기(블로어)",
+   "핵심내용": "원심압축기 임펠러 배면(backwall)을 보어 근처 평탄부-팁 근처 평탄부 사이에 볼록면(필요시 볼록→오목 변곡의 S자)을 둔 비선형 형상으로 구성. 배면 두께 분포를 최적화해 응력·질량을 조절하는 임펠러 형상 설계(2019 우선권 패밀리의 계속출원, 산업용 공기압축기 출원인).",
+   "링크": "https://patents.google.com/patent/US20260235138A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "US20210172452A1",
+     "링크": "https://patents.google.com/patent/US20210172452A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US11408434B2",
+     "링크": "https://patents.google.com/patent/US11408434B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20220381259A1",
+     "링크": "https://patents.google.com/patent/US20220381259A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US11821434B2",
+     "링크": "https://patents.google.com/patent/US11821434B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20240052846A1",
+     "링크": "https://patents.google.com/patent/US20240052846A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12110902B2",
+     "링크": "https://patents.google.com/patent/US12110902B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260117788A1",
+     "링크": "https://patents.google.com/patent/US20260117788A1/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12612923B1",
+     "링크": "https://patents.google.com/patent/US12612923B1/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP3835593A1",
+     "링크": "https://patents.google.com/patent/EP3835593A1/en",
+     "PDF": null
+    }
+   ]
+  },
+  {
+   "번호": "EP4772757A1",
+   "국가": "EP",
+   "업체": "코플랜드",
+   "출원인": "Copeland LP",
+   "구분": "공개",
+   "제목": "Compressor including motor with stator cooling fins and refrigeration system including same",
+   "공개일": "2026-07-08",
+   "출원일": "2026-01-05",
+   "등록일": null,
+   "설계분야": "모터",
+   "용도": "냉매(칠러)",
+   "핵심내용": "2단 원심 냉매압축기 모터에서 각 스테이터 티스를 권선 티스부와 그 내측으로 반경방향 연장된 냉각핀부로 구성하고, 원주방향으로 이격된 냉각핀부 사이를 냉각채널로 사용. 스테이터 내경측에 냉매 유로를 일체로 형성해 모터 냉각을 강화(청구항 1).",
+   "링크": "https://patents.google.com/patent/EP4772757A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN122348645A",
+     "링크": "https://patents.google.com/patent/CN122348645A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026119054A",
+     "링크": "https://patents.google.com/patent/JP2026119054A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20260110880A",
+     "링크": "https://patents.google.com/patent/KR20260110880A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260196899A1",
+     "링크": "https://patents.google.com/patent/US20260196899A1/en",
+     "PDF": null
+    }
+   ]
+  },
+  {
+   "번호": "JP2026119075A",
+   "국가": "JP",
+   "업체": "코플랜드",
+   "출원인": "コープランド エルピー (Copeland LP)",
+   "구분": "공개",
+   "제목": "圧縮機用冷却回路及びそれを含む圧縮機 (Cooling circuit for a compressor and compressor including the same)",
+   "공개일": "2026-07-16",
+   "출원일": "2026-01-06",
+   "등록일": null,
+   "설계분야": "냉각유로",
+   "용도": "냉매(칠러)",
+   "핵심내용": "축 양단에 1·2단 임펠러를 둔 원심압축기에서 모터 주위를 나선형으로 감는 냉각채널을 냉매 입구통로에서 제1·제2 부분으로 분기시켜, 유입 냉각제를 두 갈래 흐름으로 나눠 각각 제1·제2 출구로 배출. 모터 냉각 능력 개선.",
+   "링크": "https://patents.google.com/patent/JP2026119075A/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN122345112A",
+     "링크": "https://patents.google.com/patent/CN122345112A/en",
+     "PDF": null
+    },
+    {
+     "번호": "EP4782694A2",
+     "링크": "https://patents.google.com/patent/EP4782694A2/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20260110891A",
+     "링크": "https://patents.google.com/patent/KR20260110891A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US12704132B2",
+     "링크": "https://patents.google.com/patent/US12704132B2/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260194069A1",
+     "링크": "https://patents.google.com/patent/US20260194069A1/en",
+     "PDF": null
+    }
+   ]
+  },
+  {
+   "번호": "EP4772760A1",
+   "국가": "EP",
+   "업체": "코플랜드",
+   "출원인": "Copeland LP",
+   "구분": "공개",
+   "제목": "Methods and systems for controlling a compressor cooling system",
+   "공개일": "2026-07-08",
+   "출원일": "2026-01-05",
+   "등록일": null,
+   "설계분야": "제어·서지",
+   "용도": "냉매(칠러)",
+   "핵심내용": "2단 원심압축기(모터·베어링 등) 냉각밸브를 T_ON/T_OFF 듀티사이클 루프로 제어하고, 측정 온도가 상한을 넘으면 T_ON을 증가시키며 오버라이드 플래그를 세워 밸브를 강제 개방, 하한 이하로 내려가면 복귀. 온도 기반으로 냉각 냉매 공급량을 적응 조절하는 제어 로직.",
+   "링크": "https://patents.google.com/patent/EP4772760A1/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "CN122345113A",
+     "링크": "https://patents.google.com/patent/CN122345113A/en",
+     "PDF": null
+    },
+    {
+     "번호": "JP2026119074A",
+     "링크": "https://patents.google.com/patent/JP2026119074A/en",
+     "PDF": null
+    },
+    {
+     "번호": "KR20260111543A",
+     "링크": "https://patents.google.com/patent/KR20260111543A/en",
+     "PDF": null
+    },
+    {
+     "번호": "US20260194269A1",
+     "링크": "https://patents.google.com/patent/US20260194269A1/en",
+     "PDF": null
+    }
+   ]
+  },
+  {
+   "번호": "KR20260109566A",
+   "국가": "KR",
+   "업체": "기타",
+   "출원인": "주식회사 태양전기",
+   "구분": "공개",
+   "제목": "모터 축 변위 기반 서지 감지 기능을 구비하는 히트펌프 (Heat pump with surge detection function based on motor shaft displacement)",
+   "공개일": "2026-07-10",
+   "출원일": "2026-06-26",
+   "등록일": null,
+   "설계분야": "제어·서지",
+   "용도": "냉매(히트펌프)",
+   "핵심내용": "모터 양측에 저단·고단 압축부를 둔 양흡형 2단 원심압축기 히트펌프에서, 압축기에 구비된 센서의 모터 축 변위 등 센싱 데이터로 서지를 감지하면 고단 토출 냉매 일부를 바이패스 밸브로 어큐뮬레이터에 보내 저온 냉매와 혼합(내부 열교환기 포함 사이클). 축 변위 기반 서지 감지·회피 구성.",
+   "링크": "https://patents.google.com/patent/KR20260109566A/en",
+   "PDF": null,
+   "패밀리": [
+    {
+     "번호": "KR20250124677A",
+     "링크": "https://patents.google.com/patent/KR20250124677A/en",
+     "PDF": null
+    }
+   ]
   }
  ],
  "notes": [
